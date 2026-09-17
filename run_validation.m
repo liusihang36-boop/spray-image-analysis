@@ -25,7 +25,19 @@ if isempty(preprocessRoot) || ~isfolder(preprocessRoot)
 end
 
 fprintf('阶段2/2：测量左、中、右三束喷雾...\n');
-measurementRoot=spray_measure_threejets(preprocessRoot);
+settingsFile=fullfile(repoRoot,'config','measurement_settings.mat');
+if isfile(settingsFile)
+    fprintf('读取固定标定、喷嘴坐标和三束分界配置。\n');
+    measurementRoot=spray_measure_threejets(preprocessRoot,settingsFile,cfg.validationDir);
+else
+    fprintf('未找到固定测量配置，本次进入首次人工确认。\n');
+    measurementRoot=spray_measure_threejets(preprocessRoot);
+    generatedSettings=fullfile(measurementRoot,'measurement_settings.mat');
+    if isfile(generatedSettings)
+        copyfile(generatedSettings,settingsFile);
+        fprintf('首次确认参数已保存：%s\n',settingsFile);
+    end
+end
 result=struct('preprocessRoot',preprocessRoot, ...
     'measurementRoot',measurementRoot,'completedAt',datetime('now'));
 save(fullfile(preprocessRoot,'validation_run.mat'),'result','cfg');
