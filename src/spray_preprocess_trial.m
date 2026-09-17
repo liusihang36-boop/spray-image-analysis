@@ -1,4 +1,4 @@
-﻿function spray_preprocess_trial
+﻿function out = spray_preprocess_trial(folder,bgNames,bgPath)
 % 喷雾原始图像预处理试用版（不计算毫米贯穿距或锥角）
 % 运行：spray_preprocess_trial；需要 Image Processing Toolbox。
 % 选择直接包含 BMP 的文件夹，再选择确认无喷雾的背景帧。
@@ -9,6 +9,7 @@
 % 背景误识别，先检查参考区域，再提高阈值；不要为曲线平滑删真实边缘。
 % 这些默认值只是本批8位样图的试验起点，不是经验证的最佳阈值。
 clc;
+out='';
 % 修订：自动确定有效区域，取消所有区域选择窗口。
 p.windowDiameter_mm = 170; % 用户确认的通光直径；仅记录，尚未拟合像素直径
 % 自动区域版不使用帧间亮度校正，避免喷雾污染参考区域。
@@ -26,8 +27,11 @@ p.weakRecovery = true; % 试用：仅恢复主体6像素邻域内且本帧有灰
 p.recoveryRadius_px=6; p.recoveryFactor=0.8; p.recoveryMinNeighbors=5;
 p.saveDifference = true;    % 是否额外保存差分图
 p.frameRate = 25000;          % 仅按原文件帧号计算相对首帧时间，不是ASOI
-folder = uigetdir(pwd,'选择直接包含原始 BMP 的文件夹');
-if isequal(folder,0), return; end
+interactiveMode = nargin<1 || isempty(folder);
+if interactiveMode
+    folder = uigetdir(pwd,'选择直接包含原始 BMP 的文件夹');
+    if isequal(folder,0), return; end
+end
 files = dir(fullfile(folder,'*.bmp'));
 if isempty(files), error('该目录没有 BMP 图像。'); end
 ids = nan(numel(files),1);
@@ -42,9 +46,18 @@ p.sourceFirstID=ids(1); p.zeroFrameID=ids(1)+1; p.analysisEnd_ms=5;
 keep=ids==p.sourceFirstID | (ids>=p.zeroFrameID & (ids-p.zeroFrameID)*1000/p.frameRate<=p.analysisEnd_ms+1e-9);
 ids=ids(keep); files=files(keep);
 if numel(unique(ids))~=numel(ids), error('文件末尾帧号重复，请先核对命名。'); end
-[bgNames,bgPath]=uigetfile(fullfile(folder,'*.bmp'), ...
-    '选择无喷雾背景帧（可多选；例如000000和000001）','MultiSelect','on');
-if isequal(bgNames,0), return; end
+if nargin<2 || isempty(bgNames)
+    if interactiveMode
+        [bgNames,bgPath]=uigetfile(fullfile(folder,'*.bmp'), ...
+            '选择无喷雾背景帧（可多选；例如000000和000001）','MultiSelect','on');
+        if isequal(bgNames,0), return; end
+    else
+        % 固定验证模式：用户已确认序列第一帧为背景帧。
+        bgNames={files(1).name}; bgPath=folder;
+    end
+elseif nargin<3 || isempty(bgPath)
+    bgPath=folder;
+end
 if ischar(bgNames), bgNames={bgNames}; end
 first=readGray(fullfile(folder,files(1).name));
 [h,w]=size(first); stack=zeros(h,w,numel(bgNames),'single');
