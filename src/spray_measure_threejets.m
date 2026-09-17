@@ -12,9 +12,10 @@
 % 未连接喷嘴、触边、接触分区边界、截面缺失等均记录，不强制造出角度。
 
 out='';
-p.codeVersion="20260917_automation_1";
+p.codeVersion="20260917_core_sweep_2";
 p.requireRawOverlay=true; % 当前验证阶段必须叠加原图；正式仅二值测量可改false
-p.coreContrast=0.35; % 灰度主体：相对背景衰减35%，试用定义，不能等同外包络
+p.coreContrast=0.35; % 主结果仍使用0.35，敏感性分析同时计算候选阈值
+p.coreContrastCandidates=[0.30 0.35 0.40 0.45];
 p.coreMinArea=8; % 去除孤立噪点，不填充束间空隙
 p.fps=25000;
 p.fitRange=[0.60 0.85]; % 新增边界拟合角的固定轴向区间，不代替原半贯穿距角
@@ -357,6 +358,10 @@ S=nan(K,1); Z=S; Area=S; Angle=S; Width=S; MaxWidth=S;
 DownstreamAngle=S; DownstreamCandidate=S; FitAngle=S; FitCandidate=S; FitRMSE=S; FitCoverage=S;
 FitStatus=repmat("未计算",K,1); TipComponent=S; BaselineS=S; DownRange=S; EnvelopeWidth=S; MaxWidthBlocked=false(K,1);
 CoreCone=S; CoreDown=S; CoreLength=S; CoreStatus=repmat("未计算",K,1);
+CoreLeftHalf=S; CoreRightHalf=S;
+CoreThresholds=p.coreContrastCandidates(:)'; Q=numel(CoreThresholds);
+CoreSweepCone=nan(K,Q); CoreSweepDown=nan(K,Q); CoreSweepLength=nan(K,Q);
+CoreSweepLeftHalf=nan(K,Q); CoreSweepRightHalf=nan(K,Q);
 AngleCandidate=S; TipTouch=false(K,1); TipSector=false(K,1);
 SectionTouch=false(K,1); SectionSector=false(K,1);
 Touch=false(K,1); SectorContact=false(K,1); Detached=false(K,1);
@@ -377,7 +382,7 @@ for i=1:N
    waitbar(i/N,bar); continue;
   end
   M=readMask(path,[h w]); M=M & valid;
-  coreMask=false(h,w);
+  coreMasks=cell(1,Q);
   if useRaw
    sourceImage=imread(fullfile(raw,names{fi}));
    if size(sourceImage,3)==3, sourceImage=rgb2gray(sourceImage); end
@@ -386,7 +391,9 @@ for i=1:N
    weights=imgaussfilt(single(valid),0.8,'FilterSize',7,'Padding','replicate');
    residual=imgaussfilt((single(B)-sourceImage).*single(valid),0.8,'FilterSize',7,'Padding','replicate')./max(weights,1e-6);
    contrast=max(residual,0)./max(single(B),1);
-   coreMask=bwareaopen(valid & contrast>=p.coreContrast,p.coreMinArea,8);
+   for qc=1:Q
+    coreMasks{qc}=bwareaopen(valid & contrast>=CoreThresholds(qc),p.coreMinArea,8);
+   end
   end
   [yy,xx]=find(M); dx=double(xx)-x0; dy=double(yy)-y0;
   theta=atan2d(dx,dy); rad=hypot(dx,dy);
@@ -445,8 +452,18 @@ for i=1:N
      any(min(abs(bt-edges(2:3)),[],2)<=p.sectorGuard_deg);
    end
    if useRaw
-    [CoreCone(row),CoreDown(row),CoreLength(row),CoreStatus(row),coreSamples]= ...
-     measureGrayCore(coreMask,x0,y0,angles(j),edges,j,physicalEdge,p,scale);
+    coreSamples=[];
+    for qc=1:Q
+     [CoreSweepCone(row,qc),CoreSweepDown(row,qc),CoreSweepLength(row,qc),coreStatusNow,coreSamplesNow, ...
+      CoreSweepLeftHalf(row,qc),CoreSweepRightHalf(row,qc)]= ...
+      measureGrayCore(coreMasks{qc},x0,y0,angles(j),edges,j,physicalEdge,p,scale);
+     if abs(CoreThresholds(qc)-p.coreContrast)<1e-9
+      CoreCone(row)=CoreSweepCone(row,qc); CoreDown(row)=CoreSweepDown(row,qc);
+      CoreLength(row)=CoreSweepLength(row,qc); CoreStatus(row)=coreStatusNow;
+      CoreLeftHalf(row)=CoreSweepLeftHalf(row,qc); CoreRightHalf(row)=CoreSweepRightHalf(row,qc);
+      coreSamples=coreSamplesNow;
+     end
+    end
     [~,coreStem]=fileparts(names{fi});
     writeUtf8Csv([{'左端X_px','左端Y_px','右端X_px','右端Y_px','剔除代码'};num2cell(reshape(coreSamples,[],5))], ...
      fullfile(out,'section_samples',sprintf('%s_core_jet%d.csv',coreStem,j)));
@@ -572,6 +589,9 @@ for i=1:N
   end
  catch ME
   CoreCone(rr)=NaN; CoreDown(rr)=NaN; CoreLength(rr)=NaN; CoreStatus(rr)="处理失败";
+  CoreLeftHalf(rr)=NaN; CoreRightHalf(rr)=NaN;
+  CoreSweepCone(rr,:)=NaN; CoreSweepDown(rr,:)=NaN; CoreSweepLength(rr,:)=NaN;
+  CoreSweepLeftHalf(rr,:)=NaN; CoreSweepRightHalf(rr,:)=NaN;
   BaselineS(rr)=NaN;
   Status(rr)="failed"; Error(rr)=string(ME.message);
   DownstreamAngle(rr)=NaN; DownstreamCandidate(rr)=NaN; FitAngle(rr)=NaN; FitCandidate(rr)=NaN; FitStatus(rr)="处理失败"; AngleCandidate(rr)=NaN; S(rr)=NaN; Z(rr)=NaN; Area(rr)=NaN; Angle(rr)=NaN; Width(rr)=NaN; MaxWidth(rr)=NaN; Usable(rr)=false;
@@ -598,6 +618,7 @@ T.ConeAngle_deg(Jump)=NaN;
 DownstreamAngle(Jump)=NaN;
 FitStatus(Jump)=FitStatus(Jump)+"；相邻帧贯穿距突变，角度未采用";
 T.CoreCone_deg=CoreCone; T.CoreDown_deg=CoreDown; T.CoreLength_mm=CoreLength; T.CoreStatus=CoreStatus;
+T.CoreLeftHalfAngle_deg=CoreLeftHalf; T.CoreRightHalfAngle_deg=CoreRightHalf;
 T.EnvelopeWidth_mm=EnvelopeWidth; T.MaxWidthBoundaryFlag=MaxWidthBlocked;
 T.DownstreamSectionRange_deg=DownRange;
 T.BaselinePenetration_mm=BaselineS;
@@ -609,7 +630,8 @@ T.FitRMSE_px=FitRMSE; T.FitCoverage=FitCoverage; T.FitStatus=FitStatus;
 T.AngleCandidate_deg=AngleCandidate;
 T.TipTouch=TipTouch; T.TipSector=TipSector;
 T.SectionTouch=SectionTouch; T.SectionSector=SectionSector;
-save(fullfile(out,'measurements.mat'),'T','IgnoredPixels');
+save(fullfile(out,'measurements.mat'),'T','IgnoredPixels','CoreThresholds','CoreSweepCone', ...
+ 'CoreSweepDown','CoreSweepLength','CoreSweepLeftHalf','CoreSweepRightHalf');
 exportChinese(T,out,p,calibration);
 fid=fopen(fullfile(out,'README.txt'),'w','n','UTF-8');
 if fid>=0
@@ -769,10 +791,14 @@ qualityRows=[cellstr(T.File),num2cell(T.Time_ms),cellstr(jet), ...
 writeUtf8Csv([qualityHead;qualityRows],fullfile(out,'数值质量标记.csv'));
 
 mainCols=[1:10];
-dataHead=[head(mainCols),{'下游可见展开角_deg','灰度主体半贯穿距锥角_deg','灰度主体下游展开角_deg'}];
-dataRows=[rows(:,mainCols),num2cell([T.DownstreamAngle_deg,T.CoreCone_deg,T.CoreDown_deg])];
-writeUtf8Csv([{'原始文件名','时间_ms','喷束','主体径向贯穿距_mm','主体半贯穿距锥角_deg','主体下游展开角_deg','主体相对衰减阈值','状态'}; ...
- cellstr(T.File),num2cell(T.Time_ms),cellstr(jet),num2cell([T.CoreLength_mm,T.CoreCone_deg,T.CoreDown_deg,repmat(p.coreContrast,height(T),1)]),cellstr(T.CoreStatus)], ...
+dataHead=[head(mainCols),{'下游可见展开角_deg','灰度主体半贯穿距锥角_deg','灰度主体左侧半角_deg', ...
+ '灰度主体右侧半角_deg','灰度主体下游展开角_deg'}];
+dataRows=[rows(:,mainCols),num2cell([T.DownstreamAngle_deg,T.CoreCone_deg,T.CoreLeftHalfAngle_deg, ...
+ T.CoreRightHalfAngle_deg,T.CoreDown_deg])];
+writeUtf8Csv([{'原始文件名','时间_ms','喷束','主体径向贯穿距_mm','主体半贯穿距锥角_deg', ...
+ '主体左侧半角_deg','主体右侧半角_deg','主体下游展开角_deg','主体相对衰减阈值','状态'}; ...
+ cellstr(T.File),num2cell(T.Time_ms),cellstr(jet),num2cell([T.CoreLength_mm,T.CoreCone_deg, ...
+ T.CoreLeftHalfAngle_deg,T.CoreRightHalfAngle_deg,T.CoreDown_deg,repmat(p.coreContrast,height(T),1)]),cellstr(T.CoreStatus)], ...
  fullfile(out,'灰度主体诊断.csv'));
 info={'项目','说明';'分析窗口',sprintf('0~%g ms，第二原始帧为0ms，帧间隔0.04ms',p.analysisEnd_ms); ...
  '长度标定',sprintf('通光直径%g mm；采用像素直径%.4f px；%.8f mm/px',calibration.diameter_mm,calibration.diameter_px,calibration.mm_per_pixel); ...
@@ -901,9 +927,10 @@ for k=1:size(xy,1)
 end
 end
 
-function [cone,down,lengthMM,status,samples]=measureGrayCore(mask,x0,y0,angle,edges,j,physicalEdge,p,scale)
+function [cone,down,lengthMM,status,samples,leftHalf,rightHalf]=measureGrayCore(mask,x0,y0,angle,edges,j,physicalEdge,p,scale)
 % 独立的光学灰度主体量；不使用原包络长度，不跨越人工分区边界补全。
 cone=NaN; down=NaN; lengthMM=NaN; samples=[]; status="主体像素不足";
+leftHalf=NaN; rightHalf=NaN;
 [y,x]=find(mask); dx=x-x0; dy=y-y0; theta=atan2d(dx,dy);
 keep=dy>0 & theta>=edges(j) & theta<edges(j+1);
 x=x(keep); y=y(keep); dx=dx(keep); dy=dy(keep);
@@ -917,18 +944,31 @@ referenceOK=referenceOK && min(abs(atan2d(dx(k),dy(k))-edges(2:3)))>p.sectorGuar
 [~,~,~,ds,~,candidate,samples]=fitVisibleEdges(z,u,x0,y0,ax,normal,edges,physicalEdge,size(mask),p);
 status=ds;
 if referenceOK, down=candidate; else, status=status+"；主体前端参考无效"; end
-station=.5*rmax; values=[];
+station=.5*rmax; values=[]; leftValues=[]; rightValues=[];
 for zz=ceil(station-p.halfBand_px):floor(station+p.halfBand_px)
  part=axisSegment(sort(u(round(z)==zz)));
  if numel(part)<3, continue; end
  xy=[x0 y0]+zz*ax+[part(1);part(end)]*normal;
  th=atan2d(xy(:,1)-x0,xy(:,2)-y0);
- if endpointBlocked(xy,physicalEdge)||any(min(abs(th-edges(2:3)),[],2)<=p.sectorGuard_deg), continue; end
+ blocked=[endpointBlocked(xy(1,:),physicalEdge),endpointBlocked(xy(2,:),physicalEdge)];
+ sector=min(abs(th-edges(2:3)),[],2)<=p.sectorGuard_deg;
+ if ~blocked(1)&&~sector(1), leftValues(end+1)=abs(atan2d(part(1),zz)); end %#ok<AGROW>
+ if ~blocked(2)&&~sector(2), rightValues(end+1)=abs(atan2d(part(end),zz)); end %#ok<AGROW>
+ if any(blocked)||any(sector), continue; end
  values(end+1)=atan2d(part(end),zz)-atan2d(part(1),zz); %#ok<AGROW>
 end
+if numel(leftValues)>=p.minSections, leftHalf=median(leftValues); end
+if numel(rightValues)>=p.minSections, rightHalf=median(rightValues); end
 if referenceOK && numel(values)>=p.minSections
  cone=median(values); status=status+"；主体半贯穿截面通过";
 else
  status=status+"；主体半贯穿截面不足或参考无效";
+end
+if isfinite(leftHalf)&&isfinite(rightHalf)
+ status=status+"；双侧半角可见";
+elseif isfinite(leftHalf)||isfinite(rightHalf)
+ status=status+"；仅单侧半角可见";
+else
+ status=status+"；两侧半角均无效";
 end
 end
