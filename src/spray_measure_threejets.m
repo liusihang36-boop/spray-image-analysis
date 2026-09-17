@@ -1,4 +1,4 @@
-﻿function spray_measure_threejets
+﻿function out = spray_measure_threejets(root)
 % 三束喷雾参数测量首版。MATLAB + Image Processing Toolbox。
 % 将本文件放入当前文件夹，运行 spray_measure_threejets。
 % 输入：预处理结果目录（内含6、settings.mat、processing_log.csv）。
@@ -11,7 +11,8 @@
 % 横截面以有限像素带近似，宽度由带内逐截面宽度的中位数得到。
 % 未连接喷嘴、触边、接触分区边界、截面缺失等均记录，不强制造出角度。
 
-p.codeVersion="20260916_graycore_4";
+out='';
+p.codeVersion="20260917_automation_1";
 p.requireRawOverlay=true; % 当前验证阶段必须叠加原图；正式仅二值测量可改false
 p.coreContrast=0.35; % 灰度主体：相对背景衰减35%，试用定义，不能等同外包络
 p.coreMinArea=8; % 去除孤立噪点，不填充束间空隙
@@ -32,8 +33,10 @@ p.sectorGuard_deg=1;         % 分区边界附近像素比例，用于提示可�
 p.sectorContactFraction=0.02;
 p.overlayEvery=1;           % 每5个输入帧保存一张叠加图，可改1
 p.outerEdges_deg=[-90 90];   % 相对图像竖直向下方向，分析下半平面
-root=uigetdir(pwd,'选择预处理结果目录（包含6和settings.mat）');
-if isequal(root,0), return; end
+if nargin<1 || isempty(root)
+ root=uigetdir(pwd,'选择预处理结果目录（包含6和settings.mat）');
+ if isequal(root,0), return; end
+end
 sf=fullfile(root,'settings.mat');
 if ~isfile(sf)||~isfolder(fullfile(root,'6'))
  error('请选择包含 settings.mat 和 6 子文件夹的预处理结果目录。');
