@@ -1,4 +1,4 @@
-﻿function out = spray_measure_threejets(root)
+﻿function out = spray_measure_threejets(root,settingsFile,rawOverride)
 % 三束喷雾参数测量首版。MATLAB + Image Processing Toolbox。
 % 将本文件放入当前文件夹，运行 spray_measure_threejets。
 % 输入：预处理结果目录（内含6、settings.mat、processing_log.csv）。
@@ -54,6 +54,47 @@ zeroID=ids(2);
 if isfield(s,'p') && isfield(s.p,'zeroFrameID'), zeroID=s.p.zeroFrameID; end
 keep=(ids==ids(1)) | ((ids-zeroID)*1000/p.fps>=0 & (ids-zeroID)*1000/p.fps<=p.analysisEnd_ms+1e-9);
 ids=ids(keep); names=names(keep);
+
+savedMode=nargin>=2 && ~isempty(settingsFile) && isfile(settingsFile);
+colors=[0 .6 1;0 .85 .25;1 .5 0];
+if savedMode
+ cfg=load(settingsFile,'calibration','x0','y0','angles','edges','rf','autoXY','nozzleInfo');
+ required={'calibration','x0','y0','angles','edges'};
+ if ~all(isfield(cfg,required)), error('固定测量配置缺少必要字段，请重新进行首次标定。'); end
+ calibration=cfg.calibration; x0=double(cfg.x0); y0=double(cfg.y0);
+ angles=double(cfg.angles(:)); edges=double(cfg.edges(:)');
+ if numel(angles)~=3||numel(edges)~=4||any(~isfinite([x0;y0;angles;edges(:)]))|| ...
+   any(diff(angles)<=0)||any(diff(edges)<=0)||any(angles<=edges(1:3)')||any(angles>=edges(2:4)')
+  error('固定配置中的喷嘴、束轴或分界参数无效。');
+ end
+ if ~isfield(calibration,'mm_per_pixel')||~isfinite(calibration.mm_per_pixel)||calibration.mm_per_pixel<=0
+  error('固定配置中的长度标定无效。');
+ end
+ if isfield(cfg,'rf'), rf=cfg.rf; else, rf='saved_configuration'; end
+ rp=fullfile(root,'6');
+ if isfield(cfg,'autoXY'), autoXY=cfg.autoXY; else, autoXY=[nan nan]; end
+ if isfield(cfg,'nozzleInfo'), nozzleInfo=cfg.nozzleInfo; else, nozzleInfo=struct; end
+ if nargin>=3 && ~isempty(rawOverride), raw=rawOverride; else, raw=fileparts(root); end
+ useRaw=isfolder(raw);
+ if ~useRaw, error('固定验证的原始BMP目录不存在：%s',raw); end
+
+ % 自动模式仍保存三张检查图，供每次运行后追溯固定配置。
+ f=figure('Visible','off','Color','w'); imshow(B,[0 255]); hold on;
+ t=linspace(0,2*pi,500); cr=calibration.diameter_px/2; cc=calibration.center_xy;
+ plot(cc(1)+cr*cos(t),cc(2)+cr*sin(t),'g-','LineWidth',1.5);
+ title(sprintf('复用标定：%.6f mm/px',calibration.mm_per_pixel));
+ nf=figure('Visible','off','Color','w'); imshow(B,[0 255]); hold on;
+ plot(x0,y0,'g+','MarkerSize',18,'LineWidth',1.5); plot(x0,y0,'go','MarkerSize',10);
+ title(sprintf('复用喷嘴坐标：X=%.2f，Y=%.2f',x0,y0));
+ g=figure('Visible','off','Color','w'); imshow(B,[0 255]); hold on;
+ for jj=1:3
+  plot([x0 x0+h*sind(angles(jj))],[y0 y0+h*cosd(angles(jj))],'-','Color',colors(jj,:));
+ end
+ for jj=2:3
+  plot([x0 x0+h*sind(edges(jj))],[y0 y0+h*cosd(edges(jj))],'m--','LineWidth',1.5);
+ end
+ title(sprintf('复用分界：%.1f / %.1f 度',edges(2),edges(3)));
+else
 
 % 自动拟合视窗外轮廓：凸包顶点减少风扇等向内遮挡的干扰。
 % 自动结果仅为候选；视窗是椭圆/外圆弧不足时，请取消并核对拍摄几何。
@@ -178,7 +219,6 @@ end
 if isequal(rf,0), close(f); return; end
 R=readMask(fullfile(rp,rf),[h w]);
 g=figure('Name','设置三个喷束方向','Color','w');
-colors=[0 .6 1;0 .85 .25;1 .5 0];
 reselect=true;
 reuse=questdlg('同一批图像复核时建议复用上次束轴和分界，避免重复点击改变测量条件。', ...
  '分区参数','读取上次设置','重新选点','读取上次设置');
@@ -283,6 +323,12 @@ while true
  raw=candidateRaw; useRaw=true; break;
 end
 if useRaw
+ missingRaw=names(~cellfun(@(name)isfile(fullfile(raw,name)),names));
+ if ~isempty(missingRaw), error('原图目录缺少文件，例如 %s。未开始测量。',missingRaw{1}); end
+end
+end
+% 自动复用模式同样必须逐帧核对原图完整性。
+if savedMode
  missingRaw=names(~cellfun(@(name)isfile(fullfile(raw,name)),names));
  if ~isempty(missingRaw), error('原图目录缺少文件，例如 %s。未开始测量。',missingRaw{1}); end
 end
