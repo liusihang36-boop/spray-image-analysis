@@ -360,6 +360,7 @@ FitStatus=repmat("未计算",K,1); TipComponent=S; BaselineS=S; DownRange=S; Env
 CoreCone=S; CoreDown=S; CoreLength=S; CoreStatus=repmat("未计算",K,1);
 CoreLeftHalf=S; CoreRightHalf=S;
 CoreThresholds=p.coreContrastCandidates(:)'; Q=numel(CoreThresholds);
+[~,CoreSelectedIndex]=min(abs(CoreThresholds-p.coreContrast));
 CoreSweepCone=nan(K,Q); CoreSweepDown=nan(K,Q); CoreSweepLength=nan(K,Q);
 CoreSweepLeftHalf=nan(K,Q); CoreSweepRightHalf=nan(K,Q);
 AngleCandidate=S; TipTouch=false(K,1); TipSector=false(K,1);
@@ -550,7 +551,7 @@ for i=1:N
    else
     imshow(M);
    end
-   hold on; contour(coreMask,[.5 .5],'y:');
+   hold on; contour(coreMasks{CoreSelectedIndex},[.5 .5],'y:');
    contour(valid,[.5 .5],'c-');
    for j=1:3
     J=false(h,w); m=labels==j; J(sub2ind([h w],yy(m),xx(m)))=true;
