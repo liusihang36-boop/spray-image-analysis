@@ -10,11 +10,11 @@ if ~isfolder(srcDir)
 end
 addpath(srcDir);
 
-requiredRelease = 'R2023a';
+requiredRelease = '2023a';
 currentRelease = version('-release');
 fprintf('MATLAB版本：%s\n', currentRelease);
 if ~strcmp(currentRelease,requiredRelease)
-    warning('当前版本为%s；项目基准版本为%s。',currentRelease,requiredRelease);
+    warning('当前版本为%s；项目基准版本为R%s。',currentRelease,requiredRelease);
 end
 
 toolboxInfo = ver('images');
