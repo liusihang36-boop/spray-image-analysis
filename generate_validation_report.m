@@ -3,7 +3,7 @@ function reportFile = generate_validation_report(measurementRoot)
 
 dataFile=fullfile(measurementRoot,'measurements.mat');
 if ~isfile(dataFile), error('缺少测量数据：%s',dataFile); end
-s=load(dataFile,'T'); T=s.T;
+s=load(dataFile); T=s.T;
 required={'Jet','Penetration_mm','ConeAngle_deg','DownstreamAngle_deg', ...
     'CoreCone_deg','CoreDown_deg','TemporalJump','Status','AngleCandidate_deg', ...
     'TipTouch','TipSector','SectionTouch','SectionSector','Detached','TipComponentPixels','Error'};
@@ -46,6 +46,23 @@ for j=1:3
 end
 writecell([diagHead;diagRows],reportFile,'Sheet','锥角缺失诊断');
 
+if all(isfield(s,{'CoreThresholds','CoreSweepCone','CoreSweepDown','CoreSweepLeftHalf','CoreSweepRightHalf'}))
+    sweepHead={'主体相对衰减阈值','喷束','完整锥角有效数','完整锥角有效率_pct', ...
+        '左侧半角有效数','右侧半角有效数','仅单侧可见数','两侧均可见数', ...
+        '下游展开角有效数','下游展开角有效率_pct'};
+    sweepRows=cell(numel(s.CoreThresholds)*3,numel(sweepHead)); row=0;
+    for qc=1:numel(s.CoreThresholds)
+        for j=1:3
+            row=row+1; q=T.Jet==labels(j); n=nnz(q);
+            cone=isfinite(s.CoreSweepCone(q,qc)); down=isfinite(s.CoreSweepDown(q,qc));
+            left=isfinite(s.CoreSweepLeftHalf(q,qc)); right=isfinite(s.CoreSweepRightHalf(q,qc));
+            sweepRows(row,:)={s.CoreThresholds(qc),char(zh(j)),nnz(cone),pct(nnz(cone),n), ...
+                nnz(left),nnz(right),nnz(xor(left,right)),nnz(left&right),nnz(down),pct(nnz(down),n)};
+        end
+    end
+    writecell([sweepHead;sweepRows],reportFile,'Sheet','主体阈值敏感性');
+end
+
 problem=T.TemporalJump | T.Status=="failed";
 detailHead={'原始文件名','时间_ms','喷束','处理状态','时间突变','错误详情'};
 detailRows=cell(nnz(problem),numel(detailHead));
@@ -64,6 +81,13 @@ for j=1:3
     fprintf('  锥角缺失原因计数：截面不足%d，时间突变%d，前端触边%d，前端分界%d，截面触边%d，截面分界%d，脱离喷嘴%d，支撑不足%d。\n', ...
         diagRows{j,4},diagRows{j,5},diagRows{j,6},diagRows{j,7},diagRows{j,8}, ...
         diagRows{j,9},diagRows{j,10},diagRows{j,11});
+end
+if exist('sweepRows','var')
+    fprintf('\n灰度主体阈值敏感性（完整锥角有效率%% / 下游角有效率%%）：\n');
+    for row=1:size(sweepRows,1)
+        fprintf('阈值 %.2f %s：%.1f / %.1f；仅单侧可见%d。\n', ...
+            sweepRows{row,1},sweepRows{row,2},sweepRows{row,4},sweepRows{row,10},sweepRows{row,7});
+    end
 end
 fprintf('质量报告：%s\n',reportFile);
 end
