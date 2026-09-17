@@ -5,7 +5,8 @@ dataFile=fullfile(measurementRoot,'measurements.mat');
 if ~isfile(dataFile), error('缺少测量数据：%s',dataFile); end
 s=load(dataFile,'T'); T=s.T;
 required={'Jet','Penetration_mm','ConeAngle_deg','DownstreamAngle_deg', ...
-    'CoreCone_deg','CoreDown_deg','TemporalJump','Status'};
+    'CoreCone_deg','CoreDown_deg','TemporalJump','Status','AngleCandidate_deg', ...
+    'TipTouch','TipSector','SectionTouch','SectionSector','Detached','TipComponentPixels','Error'};
 if ~all(ismember(required,T.Properties.VariableNames))
     error('measurements.mat字段不完整，无法生成质量报告。');
 end
@@ -32,6 +33,19 @@ end
 reportFile=fullfile(measurementRoot,'自动验证报告.xlsx');
 writecell([head;rows],reportFile,'Sheet','三束质量汇总');
 
+diagHead={'喷束','有候选锥角','正式锥角缺失','截面不足','相邻帧突变', ...
+    '前端触边','前端接近分界','测角截面触边','测角截面接近分界','近喷嘴无前景','前端支撑不足'};
+diagRows=cell(3,numel(diagHead));
+for j=1:3
+    q=T.Jet==labels(j); missing=~isfinite(T.ConeAngle_deg) & isfinite(T.Penetration_mm);
+    diagRows(j,:)={char(zh(j)),nnz(q&isfinite(T.AngleCandidate_deg)),nnz(q&missing), ...
+        nnz(q&missing&~isfinite(T.AngleCandidate_deg)),nnz(q&missing&T.TemporalJump), ...
+        nnz(q&missing&T.TipTouch),nnz(q&missing&T.TipSector), ...
+        nnz(q&missing&T.SectionTouch),nnz(q&missing&T.SectionSector), ...
+        nnz(q&missing&T.Detached),nnz(q&missing&(T.TipComponentPixels<20))};
+end
+writecell([diagHead;diagRows],reportFile,'Sheet','锥角缺失诊断');
+
 problem=T.TemporalJump | T.Status=="failed";
 detailHead={'原始文件名','时间_ms','喷束','处理状态','时间突变','错误详情'};
 detailRows=cell(nnz(problem),numel(detailHead));
@@ -45,8 +59,11 @@ writecell([detailHead;detailRows],reportFile,'Sheet','异常帧');
 
 fprintf('\n自动质量汇总：\n');
 for j=1:3
-    fprintf('%s：贯穿距 %.1f%%，正式锥角 %.1f%%，灰度主体锥角 %.1f%%，下游展开角 %.1f%%。\n', ...
-        rows{j,1},rows{j,4},rows{j,6},rows{j,8},rows{j,10});
+    fprintf('%s：贯穿距 %.1f%%，正式锥角 %.1f%%，灰度主体锥角 %.1f%%，下游展开角 %.1f%%，灰度主体下游角 %.1f%%。\n', ...
+        rows{j,1},rows{j,4},rows{j,6},rows{j,8},rows{j,10},rows{j,12});
+    fprintf('  锥角缺失原因计数：截面不足%d，时间突变%d，前端触边%d，前端分界%d，截面触边%d，截面分界%d，脱离喷嘴%d，支撑不足%d。\n', ...
+        diagRows{j,4},diagRows{j,5},diagRows{j,6},diagRows{j,7},diagRows{j,8}, ...
+        diagRows{j,9},diagRows{j,10},diagRows{j,11});
 end
 fprintf('质量报告：%s\n',reportFile);
 end
