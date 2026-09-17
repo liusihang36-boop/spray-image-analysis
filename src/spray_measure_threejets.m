@@ -70,6 +70,7 @@ if savedMode
  if ~isfield(calibration,'mm_per_pixel')||~isfinite(calibration.mm_per_pixel)||calibration.mm_per_pixel<=0
   error('固定配置中的长度标定无效。');
  end
+ scale=double(calibration.mm_per_pixel);
  if isfield(cfg,'rf'), rf=cfg.rf; else, rf='saved_configuration'; end
  rp=fullfile(root,'6');
  if isfield(cfg,'autoXY'), autoXY=cfg.autoXY; else, autoXY=[nan nan]; end
