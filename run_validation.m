@@ -40,6 +40,7 @@ else
 end
 result=struct('preprocessRoot',preprocessRoot, ...
     'measurementRoot',measurementRoot,'completedAt',datetime('now'));
+result.reportFile=generate_validation_report(measurementRoot);
 save(fullfile(preprocessRoot,'validation_run.mat'),'result','cfg');
 fprintf('本次验证结束。结果目录：%s\n',preprocessRoot);
 end
