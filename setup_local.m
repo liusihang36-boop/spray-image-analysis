@@ -27,12 +27,10 @@ end
 fprintf('Image Processing Toolbox：%s（可用）\n',toolboxInfo.Version);
 
 defaultValidationDir = 'D:\桌面\验证数据目录';
-answer = inputdlg({'固定验证数据目录：'},'初始化本地验证环境',1,{defaultValidationDir});
-if isempty(answer), return; end
-validationDir = strtrim(answer{1});
-if ~isfolder(validationDir)
-    error('验证数据目录不存在：%s',validationDir);
-end
+if ~isfolder(defaultValidationDir), defaultValidationDir = pwd; end
+validationDir = uigetdir(defaultValidationDir, ...
+    '选择直接包含原始BMP的固定验证数据文件夹');
+if isequal(validationDir,0), return; end
 
 bmpFiles = dir(fullfile(validationDir,'*.bmp'));
 if isempty(bmpFiles)
