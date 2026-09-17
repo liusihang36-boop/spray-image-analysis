@@ -1,0 +1,27 @@
+# MATLAB generated files
+*.asv
+*.autosave
+*.m~
+slprj/
+codegen/
+*.mex*
+*.p
+*.fig
+
+# Experimental data and generated results
+*.bmp
+*.tif
+*.tiff
+*.mat
+*.xlsx
+*.csv
+spray_trial_*/
+results/
+output/
+data/raw/
+data/processed/
+
+# Archives and operating-system files
+*.zip
+.DS_Store
+Thumbs.db
