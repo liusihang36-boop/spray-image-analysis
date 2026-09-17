@@ -12,9 +12,9 @@
 % 未连接喷嘴、触边、接触分区边界、截面缺失等均记录，不强制造出角度。
 
 out='';
-p.codeVersion="20260917_core_sweep_2";
+p.codeVersion="20260917_core_sweep_3";
 p.requireRawOverlay=true; % 当前验证阶段必须叠加原图；正式仅二值测量可改false
-p.coreContrast=0.35; % 主结果仍使用0.35，敏感性分析同时计算候选阈值
+p.coreContrast=0.45; % 本验证集敏感性扫描后采用；候选阈值仍全部保留用于监控
 p.coreContrastCandidates=[0.30 0.35 0.40 0.45];
 p.coreMinArea=8; % 去除孤立噪点，不填充束间空隙
 p.fps=25000;
