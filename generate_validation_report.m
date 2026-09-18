@@ -46,6 +46,20 @@ for j=1:3
 end
 writecell([diagHead;diagRows],reportFile,'Sheet','锥角缺失诊断');
 
+if all(ismember({'CoreComponentCount','CoreLargestComponentFraction','CoreAxisCoverage','CoreReliable'},T.Properties.VariableNames))
+    coreHead={'喷束','主体可检测帧数','主体自动可靠帧数','主体自动可靠率_pct', ...
+        '连通域数量中位数','最大连通域占比中位数','轴线连续区覆盖率中位数','碎片化或轴向不连续帧数'};
+    coreRows=cell(3,numel(coreHead));
+    for j=1:3
+        q=T.Jet==labels(j); detected=q&isfinite(T.CoreLength_mm); n=nnz(detected);
+        reliableN=nnz(detected&T.CoreReliable);
+        coreRows(j,:)={char(zh(j)),n,reliableN,pct(reliableN,n), ...
+            finiteMedian(T.CoreComponentCount(detected)),finiteMedian(T.CoreLargestComponentFraction(detected)), ...
+            finiteMedian(T.CoreAxisCoverage(detected)),nnz(detected&~T.CoreReliable)};
+    end
+    writecell([coreHead;coreRows],reportFile,'Sheet','灰度主体可靠性');
+end
+
 if all(isfield(s,{'CoreThresholds','CoreSweepCone','CoreSweepDown','CoreSweepLeftHalf','CoreSweepRightHalf'}))
     sweepHead={'主体相对衰减阈值','喷束','完整锥角有效数','完整锥角有效率_pct', ...
         '左侧半角有效数','右侧半角有效数','仅单侧可见数','两侧均可见数', ...
@@ -81,6 +95,10 @@ for j=1:3
     fprintf('  锥角缺失原因计数：截面不足%d，时间突变%d，前端触边%d，前端分界%d，截面触边%d，截面分界%d，脱离喷嘴%d，支撑不足%d。\n', ...
         diagRows{j,4},diagRows{j,5},diagRows{j,6},diagRows{j,7},diagRows{j,8}, ...
         diagRows{j,9},diagRows{j,10},diagRows{j,11});
+    if exist('coreRows','var')
+        fprintf('  灰度主体可靠性：自动可靠 %.1f%%；碎片化或轴向不连续%d帧；最大连通域占比中位数 %.2f；轴向覆盖率中位数 %.2f。\n', ...
+            coreRows{j,4},coreRows{j,8},coreRows{j,6},coreRows{j,7});
+    end
 end
 if exist('sweepRows','var')
     fprintf('\n灰度主体阈值敏感性（完整锥角有效率%% / 下游角有效率%%）：\n');
@@ -94,4 +112,9 @@ end
 
 function value=pct(count,total)
 if total<=0, value=NaN; else, value=100*count/total; end
+end
+
+function value=finiteMedian(x)
+x=x(isfinite(x));
+if isempty(x), value=NaN; else, value=median(x); end
 end
