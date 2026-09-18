@@ -557,11 +557,19 @@ for i=1:N
    else
     imshow(M);
    end
-   hold on; contour(coreMasks{CoreSelectedIndex},[.5 .5],'y:');
-   contour(valid,[.5 .5],'c-');
+   hold on;
+   selectedCore=coreMasks{CoreSelectedIndex};
+   if any(selectedCore(:)) && ~all(selectedCore(:))
+    contour(selectedCore,[.5 .5],'y:');
+   end
+   if any(valid(:)) && ~all(valid(:))
+    contour(valid,[.5 .5],'c-');
+   end
    for j=1:3
     J=false(h,w); m=labels==j; J(sub2ind([h w],yy(m),xx(m)))=true;
-    contour(J,[.5 .5],'Color',colors(j,:));
+    if any(J(:)) && ~all(J(:))
+     contour(J,[.5 .5],'Color',colors(j,:));
+    end
     plot([x0 x0+h*sind(angles(j))],[y0 y0+h*cosd(angles(j))],'--','Color',colors(j,:));
     if all(isfinite(tips(j,:)))
      plot([x0 tips(j,1)],[y0 tips(j,2)],'-','Color',colors(j,:),'LineWidth',1.2);
