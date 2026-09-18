@@ -12,7 +12,7 @@ function out = spray_measure_threejets(root,settingsFile,rawOverride)
 % 未连接喷嘴、触边、接触分区边界、截面缺失等均记录，不强制造出角度。
 
 out='';
-p.codeVersion="20260918_core_quality_5";
+p.codeVersion="20260918_dynamic_valley_6";
 p.requireRawOverlay=true; % 当前验证阶段必须叠加原图；正式仅二值测量可改false
 p.coreContrast=0.45; % 本验证集敏感性扫描后采用；候选阈值仍全部保留用于监控
 p.coreContrastCandidates=[0.30 0.35 0.40 0.45];
@@ -23,6 +23,9 @@ p.coreMinLargestFraction=0.25; % 最大连通域占主体像素比例过低时�
 p.coreMinSupportFraction=0.25; % 轴交连续段覆盖的像素至少占本束主体四分之一
 p.coreMaxBoundaryJumpFraction=0.35; % 左右边界剧烈跳变的相邻截面比例上限
 p.coreBoundaryJump_px=8; % 单侧边界相邻截面跳变超过8像素计为粗糙/断裂
+p.valleyBand_deg=0.6; % 动态分束时沿候选角度统计的半带宽
+p.valleyMinConfidence=0.25; % 灰度谷相对两束轴线至少降低25%才采用
+p.valleyMinRadius_px=20; % 排除喷嘴近场公共区域
 p.fps=25000;
 p.fitRange=[0.60 0.85]; % 新增边界拟合角的固定轴向区间，不代替原半贯穿距角
 p.fitMinRows=15; p.fitMinCoverage=0.60;
@@ -367,6 +370,8 @@ CoreCone=S; CoreDown=S; CoreLength=S; CoreStatus=repmat("未计算",K,1);
 CoreLeftHalf=S; CoreRightHalf=S;
 CoreComponentCount=S; CoreLargestFraction=S; CoreAxisCoverage=S; CoreReliable=false(K,1);
 CoreSupportFraction=S; CoreBoundaryJumpFraction=S;
+CoreValleyConfidence=S; CoreDynamicEdgeLeft=S; CoreDynamicEdgeRight=S;
+CoreMergeCandidate=false(K,1);
 CoreThresholds=p.coreContrastCandidates(:)'; Q=numel(CoreThresholds);
 [~,CoreSelectedIndex]=min(abs(CoreThresholds-p.coreContrast));
 CoreSweepCone=nan(K,Q); CoreSweepDown=nan(K,Q); CoreSweepLength=nan(K,Q);
@@ -403,6 +408,11 @@ for i=1:N
    for qc=1:Q
     coreMasks{qc}=bwareaopen(valid & contrast>=CoreThresholds(qc),p.coreMinArea,8);
    end
+  end
+  coreEdges=edges; valleyConfidence=[NaN NaN]; mergeCandidate=[false false];
+  if useRaw
+   [coreEdges,valleyConfidence,mergeCandidate]=dynamicCoreEdges(coreMasks{CoreSelectedIndex},valid, ...
+    x0,y0,angles,edges,p);
   end
   [yy,xx]=find(M); dx=double(xx)-x0; dy=double(yy)-y0;
   theta=atan2d(dx,dy); rad=hypot(dx,dy);
@@ -466,7 +476,7 @@ for i=1:N
      [CoreSweepCone(row,qc),CoreSweepDown(row,qc),CoreSweepLength(row,qc),coreStatusNow,coreSamplesNow, ...
       CoreSweepLeftHalf(row,qc),CoreSweepRightHalf(row,qc),componentCountNow,largestFractionNow,axisCoverageNow, ...
       supportFractionNow,boundaryJumpFractionNow,coreReliableNow]= ...
-      measureGrayCore(coreMasks{qc},x0,y0,angles(j),edges,j,physicalEdge,p,scale);
+      measureGrayCore(coreMasks{qc},x0,y0,angles(j),coreEdges,j,physicalEdge,p,scale);
      if abs(CoreThresholds(qc)-p.coreContrast)<1e-9
       CoreCone(row)=CoreSweepCone(row,qc); CoreDown(row)=CoreSweepDown(row,qc);
       CoreLength(row)=CoreSweepLength(row,qc); CoreStatus(row)=coreStatusNow;
@@ -474,6 +484,14 @@ for i=1:N
       CoreComponentCount(row)=componentCountNow; CoreLargestFraction(row)=largestFractionNow;
       CoreAxisCoverage(row)=axisCoverageNow; CoreReliable(row)=coreReliableNow;
       CoreSupportFraction(row)=supportFractionNow; CoreBoundaryJumpFraction(row)=boundaryJumpFractionNow;
+      CoreDynamicEdgeLeft(row)=coreEdges(j); CoreDynamicEdgeRight(row)=coreEdges(j+1);
+      if j==1
+       CoreValleyConfidence(row)=valleyConfidence(1); CoreMergeCandidate(row)=mergeCandidate(1);
+      elseif j==2
+       CoreValleyConfidence(row)=min(valleyConfidence); CoreMergeCandidate(row)=any(mergeCandidate);
+      else
+       CoreValleyConfidence(row)=valleyConfidence(2); CoreMergeCandidate(row)=mergeCandidate(2);
+      end
       coreSamples=coreSamplesNow;
      end
     end
@@ -602,6 +620,10 @@ for i=1:N
      end
     end
    end
+   for boundaryIndex=2:3
+    plot([x0 x0+h*sind(coreEdges(boundaryIndex))], ...
+     [y0 y0+h*cosd(coreEdges(boundaryIndex))],'m:','LineWidth',1.2);
+   end
    plot(x0,y0,'r+','MarkerSize',12); axis image; xlim([1 w]); ylim([1 h]);
    title(sprintf('%s | %.2f ms | 蓝：左束  绿：中束  橙：右束',names{fi},(ids(fi)-zeroID)*1000/p.fps),'Interpreter','none');
    text(10,h-40,sprintf('版本 %s | 黄虚线=灰度主体 | 原图底图=%d',char(p.codeVersion),useRaw),'Color','w','BackgroundColor','k','Interpreter','none');
@@ -643,6 +665,8 @@ T.CoreLeftHalfAngle_deg=CoreLeftHalf; T.CoreRightHalfAngle_deg=CoreRightHalf;
 T.CoreComponentCount=CoreComponentCount; T.CoreLargestComponentFraction=CoreLargestFraction;
 T.CoreAxisCoverage=CoreAxisCoverage; T.CoreReliable=CoreReliable;
 T.CoreAxisSupportFraction=CoreSupportFraction; T.CoreBoundaryJumpFraction=CoreBoundaryJumpFraction;
+T.CoreValleyConfidence=CoreValleyConfidence; T.CoreDynamicEdgeLeft_deg=CoreDynamicEdgeLeft;
+T.CoreDynamicEdgeRight_deg=CoreDynamicEdgeRight; T.CoreMergeCandidate=CoreMergeCandidate;
 T.EnvelopeWidth_mm=EnvelopeWidth; T.MaxWidthBoundaryFlag=MaxWidthBlocked;
 T.DownstreamSectionRange_deg=DownRange;
 T.BaselinePenetration_mm=BaselineS;
@@ -822,11 +846,13 @@ dataRows=[rows(:,mainCols),num2cell([T.DownstreamAngle_deg,T.CoreCone_deg,T.Core
 writeUtf8Csv([{'原始文件名','时间_ms','喷束','主体径向贯穿距_mm','主体半贯穿距锥角_deg', ...
  '主体左侧半角_deg','主体右侧半角_deg','主体下游展开角_deg','主体相对衰减阈值', ...
  '主体连通域数量','最大连通域像素占比','轴线连续区覆盖率','轴线支撑像素比例', ...
- '边界跳变比例','主体自动可靠标记','状态'}; ...
+ '边界跳变比例','动态灰度谷置信度','动态左分界角_deg','动态右分界角_deg', ...
+ '疑似合并或分界不清','主体自动可靠标记','状态'}; ...
  cellstr(T.File),num2cell(T.Time_ms),cellstr(jet),num2cell([T.CoreLength_mm,T.CoreCone_deg, ...
  T.CoreLeftHalfAngle_deg,T.CoreRightHalfAngle_deg,T.CoreDown_deg,repmat(p.coreContrast,height(T),1), ...
  T.CoreComponentCount,T.CoreLargestComponentFraction,T.CoreAxisCoverage,T.CoreAxisSupportFraction, ...
- T.CoreBoundaryJumpFraction,double(T.CoreReliable)]),cellstr(T.CoreStatus)], ...
+ T.CoreBoundaryJumpFraction,T.CoreValleyConfidence,T.CoreDynamicEdgeLeft_deg,T.CoreDynamicEdgeRight_deg, ...
+ double(T.CoreMergeCandidate),double(T.CoreReliable)]),cellstr(T.CoreStatus)], ...
  fullfile(out,'灰度主体诊断.csv'));
 info={'项目','说明';'分析窗口',sprintf('0~%g ms，第二原始帧为0ms，帧间隔0.04ms',p.analysisEnd_ms); ...
  '长度标定',sprintf('通光直径%g mm；采用像素直径%.4f px；%.8f mm/px',calibration.diameter_mm,calibration.diameter_px,calibration.mm_per_pixel); ...
@@ -907,6 +933,49 @@ function cells=cleanMissing(cells)
 for k=1:numel(cells)
  if isnumeric(cells{k})&&isscalar(cells{k})&&~isfinite(cells{k}), cells{k}=[]; end
 end
+end
+
+function [dynamicEdges,confidence,mergeCandidate]=dynamicCoreEdges(coreMask,valid,x0,y0,angles,fixedEdges,p)
+% 在相邻束轴之间搜索灰度主体占据率最低的角度。只有灰度谷相对两侧束轴
+% 足够清晰时才替换固定分界；否则回退固定值并标记分界不清。
+dynamicEdges=fixedEdges; confidence=[NaN NaN]; mergeCandidate=[false false];
+[vy,vx]=find(valid); vdx=double(vx)-x0; vdy=double(vy)-y0;
+vr=hypot(vdx,vdy); vt=atan2d(vdx,vdy);
+[cy,cx]=find(coreMask); cdx=double(cx)-x0; cdy=double(cy)-y0;
+cr=hypot(cdx,cdy); ct=atan2d(cdx,cdy);
+if numel(cr)<p.minPixels, return; end
+sortedR=sort(cr); rmax=sortedR(max(1,round(.95*numel(sortedR))));
+if rmax<=p.valleyMinRadius_px+5, return; end
+vuse=vr>=p.valleyMinRadius_px & vr<=rmax;
+cuse=cr>=p.valleyMinRadius_px & cr<=rmax;
+for b=1:2
+ candidates=(angles(b)+1):.25:(angles(b+1)-1);
+ if isempty(candidates), continue; end
+ scores=nan(size(candidates));
+ for q=1:numel(candidates)
+  vb=abs(atan2d(sind(vt-candidates(q)),cosd(vt-candidates(q))))<=p.valleyBand_deg & vuse;
+  cb=abs(atan2d(sind(ct-candidates(q)),cosd(ct-candidates(q))))<=p.valleyBand_deg & cuse;
+  scores(q)=nnz(cb)/max(1,nnz(vb));
+ end
+ axisScore=zeros(1,2);
+ for a=1:2
+  aa=angles(b+a-1);
+  vb=abs(atan2d(sind(vt-aa),cosd(vt-aa)))<=p.valleyBand_deg & vuse;
+  cb=abs(atan2d(sind(ct-aa),cosd(ct-aa)))<=p.valleyBand_deg & cuse;
+  axisScore(a)=nnz(cb)/max(1,nnz(vb));
+ end
+ [valleyScore,ix]=min(scores); reference=mean(axisScore);
+ if reference<=0, continue; end
+ confidence(b)=max(0,min(1,1-valleyScore/reference));
+ if confidence(b)>=p.valleyMinConfidence
+  dynamicEdges(b+1)=candidates(ix);
+ else
+  mergeCandidate(b)=true;
+ end
+end
+% 数值保护：动态分界必须仍严格位于相邻固定束轴之间。
+if ~(angles(1)<dynamicEdges(2)&&dynamicEdges(2)<angles(2)), dynamicEdges(2)=fixedEdges(2); end
+if ~(angles(2)<dynamicEdges(3)&&dynamicEdges(3)<angles(3)), dynamicEdges(3)=fixedEdges(3); end
 end
 
 function writeUtf8Csv(cells,path)
