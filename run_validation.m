@@ -1,4 +1,4 @@
-function result = run_validation
+function result = run_validation(validationDir)
 %RUN_VALIDATION 固定验证数据的一键处理入口（MATLAB R2023a）。
 % 第一次运行仍需确认标定、喷嘴和分界；后续版本将复用确认配置。
 
@@ -13,6 +13,10 @@ if ~isfile(cfgFile)
     error('未找到config/local_config.mat，请先在仓库根目录运行setup_local。');
 end
 s=load(cfgFile,'cfg'); cfg=s.cfg;
+if nargin>=1 && ~isempty(validationDir)
+    if ~isfolder(validationDir), error('指定的验证数据目录不存在：%s',validationDir); end
+    cfg.validationDir=char(validationDir);
+end
 if ~isfield(cfg,'validationDir') || ~isfolder(cfg.validationDir)
     error('本地配置中的验证数据目录不存在，请重新运行setup_local。');
 end
