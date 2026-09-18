@@ -12,7 +12,7 @@ function out = spray_measure_threejets(root,settingsFile,rawOverride)
 % 未连接喷嘴、触边、接触分区边界、截面缺失等均记录，不强制造出角度。
 
 out='';
-p.codeVersion="20260918_axis_core_4";
+p.codeVersion="20260918_core_quality_5";
 p.requireRawOverlay=true; % 当前验证阶段必须叠加原图；正式仅二值测量可改false
 p.coreContrast=0.45; % 本验证集敏感性扫描后采用；候选阈值仍全部保留用于监控
 p.coreContrastCandidates=[0.30 0.35 0.40 0.45];
@@ -20,6 +20,9 @@ p.coreMinArea=8; % 去除孤立噪点，不填充束间空隙
 p.coreMaxAxialGap_px=4; % 轴向连续主体允许的最大空行；不跨越较大灰度断裂
 p.coreMinAxisCoverage=0.45; % 主连续区内至少45%的轴向行存在轴交连续段
 p.coreMinLargestFraction=0.25; % 最大连通域占主体像素比例过低时判为碎片化
+p.coreMinSupportFraction=0.25; % 轴交连续段覆盖的像素至少占本束主体四分之一
+p.coreMaxBoundaryJumpFraction=0.35; % 左右边界剧烈跳变的相邻截面比例上限
+p.coreBoundaryJump_px=8; % 单侧边界相邻截面跳变超过8像素计为粗糙/断裂
 p.fps=25000;
 p.fitRange=[0.60 0.85]; % 新增边界拟合角的固定轴向区间，不代替原半贯穿距角
 p.fitMinRows=15; p.fitMinCoverage=0.60;
@@ -363,6 +366,7 @@ FitStatus=repmat("未计算",K,1); TipComponent=S; BaselineS=S; DownRange=S; Env
 CoreCone=S; CoreDown=S; CoreLength=S; CoreStatus=repmat("未计算",K,1);
 CoreLeftHalf=S; CoreRightHalf=S;
 CoreComponentCount=S; CoreLargestFraction=S; CoreAxisCoverage=S; CoreReliable=false(K,1);
+CoreSupportFraction=S; CoreBoundaryJumpFraction=S;
 CoreThresholds=p.coreContrastCandidates(:)'; Q=numel(CoreThresholds);
 [~,CoreSelectedIndex]=min(abs(CoreThresholds-p.coreContrast));
 CoreSweepCone=nan(K,Q); CoreSweepDown=nan(K,Q); CoreSweepLength=nan(K,Q);
@@ -460,7 +464,8 @@ for i=1:N
     coreSamples=[];
     for qc=1:Q
      [CoreSweepCone(row,qc),CoreSweepDown(row,qc),CoreSweepLength(row,qc),coreStatusNow,coreSamplesNow, ...
-      CoreSweepLeftHalf(row,qc),CoreSweepRightHalf(row,qc),componentCountNow,largestFractionNow,axisCoverageNow,coreReliableNow]= ...
+      CoreSweepLeftHalf(row,qc),CoreSweepRightHalf(row,qc),componentCountNow,largestFractionNow,axisCoverageNow, ...
+      supportFractionNow,boundaryJumpFractionNow,coreReliableNow]= ...
       measureGrayCore(coreMasks{qc},x0,y0,angles(j),edges,j,physicalEdge,p,scale);
      if abs(CoreThresholds(qc)-p.coreContrast)<1e-9
       CoreCone(row)=CoreSweepCone(row,qc); CoreDown(row)=CoreSweepDown(row,qc);
@@ -468,6 +473,7 @@ for i=1:N
       CoreLeftHalf(row)=CoreSweepLeftHalf(row,qc); CoreRightHalf(row)=CoreSweepRightHalf(row,qc);
       CoreComponentCount(row)=componentCountNow; CoreLargestFraction(row)=largestFractionNow;
       CoreAxisCoverage(row)=axisCoverageNow; CoreReliable(row)=coreReliableNow;
+      CoreSupportFraction(row)=supportFractionNow; CoreBoundaryJumpFraction(row)=boundaryJumpFractionNow;
       coreSamples=coreSamplesNow;
      end
     end
@@ -636,6 +642,7 @@ T.CoreCone_deg=CoreCone; T.CoreDown_deg=CoreDown; T.CoreLength_mm=CoreLength; T.
 T.CoreLeftHalfAngle_deg=CoreLeftHalf; T.CoreRightHalfAngle_deg=CoreRightHalf;
 T.CoreComponentCount=CoreComponentCount; T.CoreLargestComponentFraction=CoreLargestFraction;
 T.CoreAxisCoverage=CoreAxisCoverage; T.CoreReliable=CoreReliable;
+T.CoreAxisSupportFraction=CoreSupportFraction; T.CoreBoundaryJumpFraction=CoreBoundaryJumpFraction;
 T.EnvelopeWidth_mm=EnvelopeWidth; T.MaxWidthBoundaryFlag=MaxWidthBlocked;
 T.DownstreamSectionRange_deg=DownRange;
 T.BaselinePenetration_mm=BaselineS;
@@ -814,10 +821,12 @@ dataRows=[rows(:,mainCols),num2cell([T.DownstreamAngle_deg,T.CoreCone_deg,T.Core
  T.CoreRightHalfAngle_deg,T.CoreDown_deg])];
 writeUtf8Csv([{'原始文件名','时间_ms','喷束','主体径向贯穿距_mm','主体半贯穿距锥角_deg', ...
  '主体左侧半角_deg','主体右侧半角_deg','主体下游展开角_deg','主体相对衰减阈值', ...
- '主体连通域数量','最大连通域像素占比','轴线连续区覆盖率','主体自动可靠标记','状态'}; ...
+ '主体连通域数量','最大连通域像素占比','轴线连续区覆盖率','轴线支撑像素比例', ...
+ '边界跳变比例','主体自动可靠标记','状态'}; ...
  cellstr(T.File),num2cell(T.Time_ms),cellstr(jet),num2cell([T.CoreLength_mm,T.CoreCone_deg, ...
  T.CoreLeftHalfAngle_deg,T.CoreRightHalfAngle_deg,T.CoreDown_deg,repmat(p.coreContrast,height(T),1), ...
- T.CoreComponentCount,T.CoreLargestComponentFraction,T.CoreAxisCoverage,double(T.CoreReliable)]),cellstr(T.CoreStatus)], ...
+ T.CoreComponentCount,T.CoreLargestComponentFraction,T.CoreAxisCoverage,T.CoreAxisSupportFraction, ...
+ T.CoreBoundaryJumpFraction,double(T.CoreReliable)]),cellstr(T.CoreStatus)], ...
  fullfile(out,'灰度主体诊断.csv'));
 info={'项目','说明';'分析窗口',sprintf('0~%g ms，第二原始帧为0ms，帧间隔0.04ms',p.analysisEnd_ms); ...
  '长度标定',sprintf('通光直径%g mm；采用像素直径%.4f px；%.8f mm/px',calibration.diameter_mm,calibration.diameter_px,calibration.mm_per_pixel); ...
@@ -947,12 +956,12 @@ for k=1:size(xy,1)
 end
 end
 
-function [cone,down,lengthMM,status,samples,leftHalf,rightHalf,componentCount,largestFraction,axisCoverage,reliable]=measureGrayCore(mask,x0,y0,angle,edges,j,physicalEdge,p,scale)
+function [cone,down,lengthMM,status,samples,leftHalf,rightHalf,componentCount,largestFraction,axisCoverage,supportFraction,boundaryJumpFraction,reliable]=measureGrayCore(mask,x0,y0,angle,edges,j,physicalEdge,p,scale)
 % 独立的光学灰度主体量。只使用与固定束轴相交的连续截面，并从中选择
 % 最长的轴向连续区；离轴孤岛不能再决定主体长度或半贯穿距位置。
 cone=NaN; down=NaN; lengthMM=NaN; samples=[]; status="主体像素不足";
 leftHalf=NaN; rightHalf=NaN;
-componentCount=0; largestFraction=NaN; axisCoverage=0; reliable=false;
+componentCount=0; largestFraction=NaN; axisCoverage=0; supportFraction=0; boundaryJumpFraction=NaN; reliable=false;
 [y,x]=find(mask); dx=x-x0; dy=y-y0; theta=atan2d(dx,dy);
 keep=dy>0 & theta>=edges(j) & theta<edges(j+1);
 x=x(keep); y=y(keep); dx=dx(keep); dy=dy(keep);
@@ -974,6 +983,16 @@ end
 if numel(validRows)<p.minSections
  status="主体轴交截面不足"; return;
 end
+% 覆盖率相对于主体全部轴向范围，而不是相对于事后挑出的最好连续段。
+axisCoverage=numel(validRows)/max(1,max(allRows)-min(allRows)+1);
+supportFraction=sum(max(0,rowRight-rowLeft+1))/numel(x);
+adj=diff(validRows)<=p.coreMaxAxialGap_px;
+if any(adj)
+ jumps=abs(diff(rowLeft))>p.coreBoundaryJump_px | abs(diff(rowRight))>p.coreBoundaryJump_px;
+ boundaryJumpFraction=nnz(jumps&adj)/nnz(adj);
+else
+ boundaryJumpFraction=1;
+end
 % 允许少量空行，但不跨越明显灰度断裂；选择包含截面最多的连续区。
 breaks=[0 find(diff(validRows)>p.coreMaxAxialGap_px) numel(validRows)];
 best=[];
@@ -982,7 +1001,6 @@ for b=1:numel(breaks)-1
  if isempty(best)||numel(idx)>numel(best), best=idx; end
 end
 validRows=validRows(best); rowLeft=rowLeft(best); rowRight=rowRight(best);
-axisCoverage=numel(validRows)/max(1,validRows(end)-validRows(1)+1);
 rEnd=max(hypot(validRows*ax(1)+rowLeft*normal(1),validRows*ax(2)+rowLeft*normal(2)), ...
  hypot(validRows*ax(1)+rowRight*normal(1),validRows*ax(2)+rowRight*normal(2)));
 [rmax,krow]=max(rEnd); lengthMM=rmax*scale;
@@ -991,11 +1009,13 @@ tipXY=[x0 y0]+validRows(krow)*ax+[rowLeft(krow);rowRight(krow)]*normal;
 referenceOK=~endpointBlocked(tipXY,physicalEdge);
 tipTheta=atan2d(tipXY(:,1)-x0,tipXY(:,2)-y0);
 referenceOK=referenceOK && all(min(abs(tipTheta-edges(2:3)),[],2)>p.sectorGuard_deg);
-reliable=axisCoverage>=p.coreMinAxisCoverage && largestFraction>=p.coreMinLargestFraction;
+reliable=axisCoverage>=p.coreMinAxisCoverage && largestFraction>=p.coreMinLargestFraction && ...
+ supportFraction>=p.coreMinSupportFraction && boundaryJumpFraction<=p.coreMaxBoundaryJumpFraction;
 [~,~,~,ds,~,candidate,samples]=fitVisibleEdges(z,u,x0,y0,ax,normal,edges,physicalEdge,size(mask),p);
 status=ds;
 if ~reliable
- status=status+sprintf("；主体碎片化(连通域%d，最大占比%.2f，轴向覆盖%.2f)",componentCount,largestFraction,axisCoverage);
+ status=status+sprintf("；主体质量不足(连通域%d，最大占比%.2f，轴向覆盖%.2f，轴线支撑%.2f，边界跳变%.2f)", ...
+  componentCount,largestFraction,axisCoverage,supportFraction,boundaryJumpFraction);
 elseif referenceOK
  down=candidate;
 else
