@@ -12,7 +12,7 @@ function out = spray_measure_threejets(root,settingsFile,rawOverride)
 % 未连接喷嘴、触边、接触分区边界、截面缺失等均记录，不强制造出角度。
 
 out='';
-p.codeVersion="20260918_dynamic_valley_6";
+p.codeVersion="20260918_visible_angle_7";
 p.requireRawOverlay=true; % 当前验证阶段必须叠加原图；正式仅二值测量可改false
 p.coreContrast=0.45; % 本验证集敏感性扫描后采用；候选阈值仍全部保留用于监控
 p.coreContrastCandidates=[0.30 0.35 0.40 0.45];
@@ -38,6 +38,8 @@ p.windowDiameter_mm=170;
 p.minPixels=60;              % 少于此值，该束标记too_small，数值保持NaN
 p.halfBand_px=2;             % 半贯穿距截面半带宽，最少需有2个有效截面
 p.minSections=2;
+p.coreHalfBand_px=5; % 灰度主体用11像素局部带取中位数，降低单行孔洞造成的缺失
+p.coreMinSections=3;
 p.nozzleCheckRadius_px=25;   % 喷雾近喷嘴检查半径；用于锥角有效性检查
 p.sectorGuard_deg=1;         % 分区边界附近像素比例，用于提示可能交叠
 p.sectorContactFraction=0.02;
@@ -511,10 +513,11 @@ for i=1:N
    end
    [FitCandidate(row),FitRMSE(row),FitCoverage(row),FitStatus(row),fitLines{j},DownstreamCandidate(row),edgeSamples{j}]= ...
     fitVisibleEdges(z,u,x0,y0,ax,normal,edges,physicalEdge,[h w],p);
-   if ~TipTouch(row)&&~TipSector(row)&&~Detached(row)&&TipComponent(row)>=p.tipSmallComponent_px
+   if isfinite(DownstreamCandidate(row))
     DownstreamAngle(row)=DownstreamCandidate(row);
-   elseif isfinite(DownstreamCandidate(row))
-    FitStatus(row)=FitStatus(row)+"；前端触边/局部支撑不足/近喷嘴未连接，角度未采用";
+    if TipTouch(row)||TipSector(row)||Detached(row)||TipComponent(row)<p.tipSmallComponent_px
+     FitStatus(row)=FitStatus(row)+"；前端异常仅影响贯穿距参考量，下游可见角仍保留";
+    end
    end
    if numel(left)>=p.minSections
     ul=median(left); ur=median(right);
@@ -554,8 +557,8 @@ for i=1:N
    cur=rr(j); prev=cur-3;
    if prev>=1 && FrameID(cur)==FrameID(prev)+1 && isfinite(S(cur)) && isfinite(S(prev))
     if abs(S(cur)-S(prev))>max(p.jumpAbs_mm,p.jumpRel*S(prev))
-     Angle(cur)=NaN; DownstreamAngle(cur)=NaN;
-     FitStatus(cur)=FitStatus(cur)+"；贯穿距突变，角度未采用";
+     Angle(cur)=NaN;
+     FitStatus(cur)=FitStatus(cur)+"；贯穿距突变，半贯穿锥角未采用；下游可见角保留";
     end
    end
   end
@@ -563,8 +566,8 @@ for i=1:N
    cur=rr(j); prev=cur-3;
    if prev>=1 && FrameID(cur)==FrameID(prev)+1 && isfinite(CoreLength(cur)) && isfinite(CoreLength(prev))
     if abs(CoreLength(cur)-CoreLength(prev))>max(p.jumpAbs_mm,p.jumpRel*CoreLength(prev))
-     CoreCone(cur)=NaN; CoreDown(cur)=NaN;
-     CoreStatus(cur)=CoreStatus(cur)+"；主体贯穿距突变，角度未采用";
+     CoreCone(cur)=NaN;
+     CoreStatus(cur)=CoreStatus(cur)+"；主体贯穿距突变，半贯穿锥角未采用；下游可见角保留";
     end
    end
   end
@@ -658,8 +661,7 @@ for j=1:3
 end
 % 角度参考长度发生突变时，候选值留诊断，正式角度不作为通过结果。
 T.ConeAngle_deg(Jump)=NaN;
-DownstreamAngle(Jump)=NaN;
-FitStatus(Jump)=FitStatus(Jump)+"；相邻帧贯穿距突变，角度未采用";
+FitStatus(Jump)=FitStatus(Jump)+"；相邻帧贯穿距突变，半贯穿锥角未采用；下游可见角保留";
 T.CoreCone_deg=CoreCone; T.CoreDown_deg=CoreDown; T.CoreLength_mm=CoreLength; T.CoreStatus=CoreStatus;
 T.CoreLeftHalfAngle_deg=CoreLeftHalf; T.CoreRightHalfAngle_deg=CoreRightHalf;
 T.CoreComponentCount=CoreComponentCount; T.CoreLargestComponentFraction=CoreLargestFraction;
@@ -828,7 +830,7 @@ writeUtf8Csv([extraHead;extraRows],fullfile(out,'边界与前端诊断.csv'));
 lengthOK=isfinite(T.Penetration_mm)&~T.TipTouch&~T.TipSector& ...
  T.TipComponentPixels>=p.tipSmallComponent_px&~T.TemporalJump;
 halfOK=isfinite(T.ConeAngle_deg)&lengthOK;
-downOK=isfinite(T.DownstreamAngle_deg)&lengthOK;
+downOK=isfinite(T.DownstreamAngle_deg); % 局部可见角独立于最前端贯穿距质量
 qualityHead={'原始文件名','时间_ms','喷束','贯穿距自动筛选通过','半贯穿距锥角自动筛选通过', ...
  '下游展开角自动筛选通过','可见面积未触遮挡','分区归属无警告','恢复前贯穿距_mm','弱边缘恢复引起变化_mm','下游有效截面角度极差_deg','最大宽度端点无边界干扰','旧包络最大宽度_mm'};
 qualityRows=[cellstr(T.File),num2cell(T.Time_ms),cellstr(jet), ...
@@ -872,7 +874,9 @@ try
  {'拟合检查','剔除接近人工分界和遮挡的截面端点，检查连续横截面、覆盖率和拟合残差。弯曲或无法分辨的边界不强行输出'}; ...
  {'前端时间检查','保留原始最大径向距离；小连通域与相邻帧跳变另存诊断，不删帧不插值'}; ...
  {'中文编码','CSV采用UTF-8 BOM；优先打开XLSX。MATLAB源文件也保存为UTF-8 BOM'}];
- info=[info;{'下游可见展开角','固定0.60~0.85倍轴向贯穿距区间，剔除人工边界和遮挡后，逐截面计算两端与喷嘴连线夹角，取中位数；不同于原半贯穿距锥角，也不同于直线斜率角'};{'起始空白','二值图无前景时不可测，不填零；时间仍按用户指定第二帧为0ms'}];
+ info=[info;{'下游可见展开角','固定0.60~0.85倍轴向可见长度区间，剔除人工边界和遮挡后，逐截面计算两端与喷嘴连线夹角，取中位数；它是局部可见角，不因最前端触边或贯穿距突变而删除'}; ...
+ {'灰度主体半贯穿角','在动态灰度谷分束后，以半贯穿位置前后11像素局部带的有效截面中位数计算；仍要求前端参考和双侧边缘有效'}; ...
+ {'起始空白','二值图无前景时不可测，不填零；时间仍按用户指定第二帧为0ms'}];
  writeUtf8Csv(info,fullfile(out,'参数定义.csv'));
  labs=["Left","Middle","Right"]; zh={'左束','中束','右束'};
  % 每束独立工作表和CSV，不再输出堆叠总表或三束并列表。
@@ -1085,13 +1089,16 @@ status=ds;
 if ~reliable
  status=status+sprintf("；主体质量不足(连通域%d，最大占比%.2f，轴向覆盖%.2f，轴线支撑%.2f，边界跳变%.2f)", ...
   componentCount,largestFraction,axisCoverage,supportFraction,boundaryJumpFraction);
-elseif referenceOK
- down=candidate;
 else
+ % 下游可见局部角由0.60~0.85轴向区间直接决定，不依赖最前端是否触边。
+ % 前端无效只影响以贯穿距为参考的半贯穿锥角，不能连带删除清楚的下游截面。
+ down=candidate;
+end
+if ~referenceOK
  status=status+"；主体前端参考无效";
 end
 station=.5*validRows(krow); values=[]; leftValues=[]; rightValues=[];
-for zz=ceil(station-p.halfBand_px):floor(station+p.halfBand_px)
+for zz=ceil(station-p.coreHalfBand_px):floor(station+p.coreHalfBand_px)
  q=find(validRows==zz,1); if isempty(q), continue; end
  part=[rowLeft(q) rowRight(q)];
  xy=[x0 y0]+zz*ax+[part(1);part(end)]*normal;
@@ -1103,9 +1110,9 @@ for zz=ceil(station-p.halfBand_px):floor(station+p.halfBand_px)
  if any(blocked)||any(sector), continue; end
  values(end+1)=atan2d(part(end),zz)-atan2d(part(1),zz); %#ok<AGROW>
 end
-if numel(leftValues)>=p.minSections, leftHalf=median(leftValues); end
-if numel(rightValues)>=p.minSections, rightHalf=median(rightValues); end
-if reliable && referenceOK && numel(values)>=p.minSections
+if numel(leftValues)>=p.coreMinSections, leftHalf=median(leftValues); end
+if numel(rightValues)>=p.coreMinSections, rightHalf=median(rightValues); end
+if reliable && referenceOK && numel(values)>=p.coreMinSections
  cone=median(values); status=status+"；主体半贯穿截面通过";
 else
  status=status+"；主体半贯穿截面不足或参考无效";
