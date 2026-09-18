@@ -63,6 +63,19 @@ if all(ismember({'CoreComponentCount','CoreLargestComponentFraction','CoreAxisCo
     writecell([coreHead;coreRows],reportFile,'Sheet','灰度主体可靠性');
 end
 
+if all(ismember({'CoreValleyConfidence','CoreDynamicEdgeLeft_deg','CoreDynamicEdgeRight_deg','CoreMergeCandidate'},T.Properties.VariableNames))
+    valleyHead={'喷束','有效灰度谷置信度中位数','分界不清或疑似合并帧数','分界不清或疑似合并率_pct', ...
+        '动态左分界角中位数_deg','动态右分界角中位数_deg'};
+    valleyRows=cell(3,numel(valleyHead));
+    for j=1:3
+        q=T.Jet==labels(j); n=nnz(q);
+        mergeN=nnz(q&T.CoreMergeCandidate);
+        valleyRows(j,:)={char(zh(j)),finiteMedian(T.CoreValleyConfidence(q)),mergeN,pct(mergeN,n), ...
+            finiteMedian(T.CoreDynamicEdgeLeft_deg(q)),finiteMedian(T.CoreDynamicEdgeRight_deg(q))};
+    end
+    writecell([valleyHead;valleyRows],reportFile,'Sheet','动态分界诊断');
+end
+
 if all(isfield(s,{'CoreThresholds','CoreSweepCone','CoreSweepDown','CoreSweepLeftHalf','CoreSweepRightHalf'}))
     sweepHead={'主体相对衰减阈值','喷束','完整锥角有效数','完整锥角有效率_pct', ...
         '左侧半角有效数','右侧半角有效数','仅单侧可见数','两侧均可见数', ...
@@ -101,6 +114,10 @@ for j=1:3
     if exist('coreRows','var')
         fprintf('  灰度主体可靠性：自动可靠 %.1f%%；质量不足%d帧；最大连通域占比 %.2f；轴向覆盖 %.2f；轴线支撑 %.2f；边界跳变 %.2f。\n', ...
             coreRows{j,4},coreRows{j,10},coreRows{j,6},coreRows{j,7},coreRows{j,8},coreRows{j,9});
+    end
+    if exist('valleyRows','var')
+        fprintf('  动态分界：灰度谷置信度中位数 %.2f；分界不清或疑似合并 %.1f%%。\n', ...
+            valleyRows{j,2},valleyRows{j,4});
     end
 end
 if exist('sweepRows','var')
