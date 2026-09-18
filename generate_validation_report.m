@@ -46,16 +46,19 @@ for j=1:3
 end
 writecell([diagHead;diagRows],reportFile,'Sheet','锥角缺失诊断');
 
-if all(ismember({'CoreComponentCount','CoreLargestComponentFraction','CoreAxisCoverage','CoreReliable'},T.Properties.VariableNames))
+if all(ismember({'CoreComponentCount','CoreLargestComponentFraction','CoreAxisCoverage', ...
+        'CoreAxisSupportFraction','CoreBoundaryJumpFraction','CoreReliable'},T.Properties.VariableNames))
     coreHead={'喷束','主体可检测帧数','主体自动可靠帧数','主体自动可靠率_pct', ...
-        '连通域数量中位数','最大连通域占比中位数','轴线连续区覆盖率中位数','碎片化或轴向不连续帧数'};
+        '连通域数量中位数','最大连通域占比中位数','轴向覆盖率中位数', ...
+        '轴线支撑比例中位数','边界跳变比例中位数','主体质量不足帧数'};
     coreRows=cell(3,numel(coreHead));
     for j=1:3
         q=T.Jet==labels(j); detected=q&isfinite(T.CoreLength_mm); n=nnz(detected);
         reliableN=nnz(detected&T.CoreReliable);
         coreRows(j,:)={char(zh(j)),n,reliableN,pct(reliableN,n), ...
             finiteMedian(T.CoreComponentCount(detected)),finiteMedian(T.CoreLargestComponentFraction(detected)), ...
-            finiteMedian(T.CoreAxisCoverage(detected)),nnz(detected&~T.CoreReliable)};
+            finiteMedian(T.CoreAxisCoverage(detected)),finiteMedian(T.CoreAxisSupportFraction(detected)), ...
+            finiteMedian(T.CoreBoundaryJumpFraction(detected)),nnz(detected&~T.CoreReliable)};
     end
     writecell([coreHead;coreRows],reportFile,'Sheet','灰度主体可靠性');
 end
@@ -96,8 +99,8 @@ for j=1:3
         diagRows{j,4},diagRows{j,5},diagRows{j,6},diagRows{j,7},diagRows{j,8}, ...
         diagRows{j,9},diagRows{j,10},diagRows{j,11});
     if exist('coreRows','var')
-        fprintf('  灰度主体可靠性：自动可靠 %.1f%%；碎片化或轴向不连续%d帧；最大连通域占比中位数 %.2f；轴向覆盖率中位数 %.2f。\n', ...
-            coreRows{j,4},coreRows{j,8},coreRows{j,6},coreRows{j,7});
+        fprintf('  灰度主体可靠性：自动可靠 %.1f%%；质量不足%d帧；最大连通域占比 %.2f；轴向覆盖 %.2f；轴线支撑 %.2f；边界跳变 %.2f。\n', ...
+            coreRows{j,4},coreRows{j,10},coreRows{j,6},coreRows{j,7},coreRows{j,8},coreRows{j,9});
     end
 end
 if exist('sweepRows','var')
