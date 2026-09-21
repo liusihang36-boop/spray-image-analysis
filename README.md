@@ -1,6 +1,6 @@
 # 喷雾图像分析（Spray Image Analysis）
 
-用于高速摄影喷雾序列的 MATLAB 图像处理与三束喷雾参数测量。
+用于高速摄影喷雾序列的 MATLAB 图像处理，以及三束独立喷雾/塌缩合并整体喷雾的双模式测量。
 
 ## 当前功能
 
@@ -12,19 +12,26 @@
 - 分别计算贯穿距、轴向贯穿距、投影面积、锥角、截面宽度和下游展开角。
 - 将左、中、右三束分别输出到独立工作表和 CSV。
 - 保存质量检查日志、边界诊断、测量设置和可视化结果。
+- 高温塌缩或合并后切换到整体喷雾模式，不再强制输出左、中、右伪结果。
 
 ## 文件
 
 - `src/spray_preprocess_trial.m`：序列预处理和二值化。
 - `src/spray_measure_threejets.m`：三束喷雾几何参数测量。
+- `src/spray_measure_merged.m`：塌缩/合并整体喷雾几何参数测量。
+- `run_validation_threejets.m`：三束独立模式入口。
+- `run_validation_mergedspray.m`：整体合并模式入口。
 
 ## 使用顺序
 
 1. 在 MATLAB 中运行 `spray_preprocess_trial`，选择包含原始 BMP 序列的目录。
 2. 检查生成的背景、掩膜、差分图和叠加图。
-3. 运行 `spray_measure_threejets`，选择预处理结果目录及原始 BMP 目录。
+3. 未合并工况运行 `run_validation_threejets`；塌缩/合并工况运行 `run_validation_mergedspray`。
 4. 依次确认窗口标定、喷嘴坐标和三束分界线。
-5. 检查输出的三束测量表、质量检查日志和代表帧预览。
+5. 检查对应模式的测量表、质量检查日志和代表帧预览。
+
+批量入口 `run_validation_batch` 会读取各工况目录内的 `analysis_mode.txt`。文件内容只能是
+`three_jets` 或 `merged_spray`；首次不存在时程序给出建议并要求人工确认。
 
 ## 固定实验条件
 
