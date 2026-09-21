@@ -1,4 +1,4 @@
-function result = run_validation(validationDir,settingsFile)
+function result = run_validation(validationDir,settingsFile,analysisMode)
 %RUN_VALIDATION 固定验证数据的一键处理入口（MATLAB R2023a）。
 % 可指定独立settingsFile；不存在时首次人工确认并保存，后续仅复用该配置。
 
@@ -21,8 +21,17 @@ if ~isfield(cfg,'validationDir') || ~isfolder(cfg.validationDir)
     error('本地配置中的验证数据目录不存在，请重新运行setup_local。');
 end
 
+if nargin<3 || isempty(analysisMode), analysisMode="three_jets"; end
+analysisMode=lower(string(analysisMode));
+if ~ismember(analysisMode,["three_jets","merged_spray"])
+    error('analysisMode必须为three_jets或merged_spray。');
+end
 if nargin<2 || isempty(settingsFile)
-    settingsFile=fullfile(repoRoot,'config','measurement_settings.mat');
+    if analysisMode=="merged_spray"
+        settingsFile=fullfile(repoRoot,'config','measurement_settings_merged.mat');
+    else
+        settingsFile=fullfile(repoRoot,'config','measurement_settings.mat');
+    end
 else
     settingsFile=char(settingsFile);
 end
@@ -34,13 +43,21 @@ if isempty(preprocessRoot) || ~isfolder(preprocessRoot)
     error('预处理未完成，没有生成有效结果目录。');
 end
 
-fprintf('阶段2/2：测量左、中、右三束喷雾...\n');
+fprintf('阶段2/2：分析模式 %s。\n',analysisMode);
 if isfile(settingsFile)
-    fprintf('读取固定标定、喷嘴坐标和三束分界配置。\n');
-    measurementRoot=spray_measure_threejets(preprocessRoot,settingsFile,cfg.validationDir);
+    fprintf('读取本工况独立测量配置。\n');
+    if analysisMode=="merged_spray"
+        measurementRoot=spray_measure_merged(preprocessRoot,settingsFile,cfg.validationDir);
+    else
+        measurementRoot=spray_measure_threejets(preprocessRoot,settingsFile,cfg.validationDir);
+    end
 else
     fprintf('未找到固定测量配置，本次进入首次人工确认。\n');
-    measurementRoot=spray_measure_threejets(preprocessRoot,[],cfg.validationDir);
+    if analysisMode=="merged_spray"
+        measurementRoot=spray_measure_merged(preprocessRoot,[],cfg.validationDir);
+    else
+        measurementRoot=spray_measure_threejets(preprocessRoot,[],cfg.validationDir);
+    end
     generatedSettings=fullfile(measurementRoot,'measurement_settings.mat');
     if isfile(generatedSettings)
         settingsDir=fileparts(settingsFile);
@@ -49,9 +66,13 @@ else
         fprintf('首次确认参数已保存：%s\n',settingsFile);
     end
 end
-result=struct('preprocessRoot',preprocessRoot, ...
-    'measurementRoot',measurementRoot,'completedAt',datetime('now'));
-result.reportFile=generate_validation_report(measurementRoot);
+result=struct('preprocessRoot',preprocessRoot,'measurementRoot',measurementRoot, ...
+    'analysisMode',analysisMode,'completedAt',datetime('now'));
+if analysisMode=="merged_spray"
+    result.reportFile=generate_merged_report(measurementRoot);
+else
+    result.reportFile=generate_validation_report(measurementRoot);
+end
 save(fullfile(preprocessRoot,'validation_run.mat'),'result','cfg');
 fprintf('本次验证结束。结果目录：%s\n',preprocessRoot);
 end
