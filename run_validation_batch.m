@@ -1,6 +1,7 @@
 function batchResult = run_validation_batch(batchRoot)
 %RUN_VALIDATION_BATCH 批量处理代表性工况子文件夹（MATLAB R2023a）。
-% 每个直接子文件夹应直接包含原始BMP。复用config/measurement_settings.mat。
+% 每个直接子文件夹应直接包含原始BMP。
+% 每个工况使用并保存自己的measurement_settings.mat；首次需逐工况人工确认。
 % 单个工况失败会记录错误并继续，最终在batchRoot生成批量验证总表.xlsx。
 
 repoRoot=fileparts(mfilename('fullpath'));
@@ -9,11 +10,6 @@ if nargin<1 || isempty(batchRoot)
     if isequal(batchRoot,0), batchResult=table; return; end
 end
 if ~isfolder(batchRoot), error('批量数据根目录不存在：%s',batchRoot); end
-settingsFile=fullfile(repoRoot,'config','measurement_settings.mat');
-if ~isfile(settingsFile)
-    error('批量处理前必须先完成单工况标定，并保留config/measurement_settings.mat。');
-end
-
 d=dir(batchRoot); d=d([d.isdir]);
 names=string({d.name});
 keep=names~="." & names~=".." & ~startsWith(names,".") & ~startsWith(names,"spray_trial_");
@@ -38,7 +34,13 @@ for k=1:numel(d)
     condition=string(d(k).name); rawDir=fullfile(d(k).folder,d(k).name);
     fprintf('\n========== 工况 %d/%d：%s ==========\n',k,numel(d),condition);
     try
-        one=run_validation(rawDir);
+        conditionSettings=fullfile(rawDir,'measurement_settings.mat');
+        if isfile(conditionSettings)
+            fprintf('读取本工况独立标定：%s\n',conditionSettings);
+        else
+            fprintf('本工况尚未标定，将进入首次人工确认；完成后配置保存在该工况目录。\n');
+        end
+        one=run_validation(rawDir,conditionSettings);
         s=load(fullfile(one.measurementRoot,'measurements.mat'),'T'); T=s.T;
         for j=1:3
             q=T.Jet==labels(j); n=nnz(q);
