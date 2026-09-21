@@ -1,6 +1,6 @@
-function result = run_validation(validationDir)
+function result = run_validation(validationDir,settingsFile)
 %RUN_VALIDATION 固定验证数据的一键处理入口（MATLAB R2023a）。
-% 第一次运行仍需确认标定、喷嘴和分界；后续版本将复用确认配置。
+% 可指定独立settingsFile；不存在时首次人工确认并保存，后续仅复用该配置。
 
 repoRoot=fileparts(mfilename('fullpath'));
 if isfolder(fullfile(repoRoot,'src'))
@@ -21,6 +21,12 @@ if ~isfield(cfg,'validationDir') || ~isfolder(cfg.validationDir)
     error('本地配置中的验证数据目录不存在，请重新运行setup_local。');
 end
 
+if nargin<2 || isempty(settingsFile)
+    settingsFile=fullfile(repoRoot,'config','measurement_settings.mat');
+else
+    settingsFile=char(settingsFile);
+end
+
 fprintf('验证数据：%s\n',cfg.validationDir);
 fprintf('阶段1/2：处理0~%.1f ms原始序列...\n',cfg.analysisEnd_ms);
 preprocessRoot=spray_preprocess_trial(cfg.validationDir);
@@ -29,7 +35,6 @@ if isempty(preprocessRoot) || ~isfolder(preprocessRoot)
 end
 
 fprintf('阶段2/2：测量左、中、右三束喷雾...\n');
-settingsFile=fullfile(repoRoot,'config','measurement_settings.mat');
 if isfile(settingsFile)
     fprintf('读取固定标定、喷嘴坐标和三束分界配置。\n');
     measurementRoot=spray_measure_threejets(preprocessRoot,settingsFile,cfg.validationDir);
@@ -38,6 +43,8 @@ else
     measurementRoot=spray_measure_threejets(preprocessRoot);
     generatedSettings=fullfile(measurementRoot,'measurement_settings.mat');
     if isfile(generatedSettings)
+        settingsDir=fileparts(settingsFile);
+        if ~isempty(settingsDir) && ~isfolder(settingsDir), mkdir(settingsDir); end
         copyfile(generatedSettings,settingsFile);
         fprintf('首次确认参数已保存：%s\n',settingsFile);
     end
