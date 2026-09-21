@@ -80,8 +80,12 @@ for k=1:size(stack,3)
 end
 sigma=max(1,1.4826*median(abs(noise-median(noise))));
 if size(stack,3)<5
-    warning('背景不足5帧，噪声估计仅供试用；正式处理建议提供更多无喷雾帧。');
+    p.noiseEstimateQuality='single_or_few_background_frames';
+    warning('本工况仅有%d张已确认背景帧：背景中位图可用，但帧间噪声尺度为降级估计；已写入质量记录。',size(stack,3));
+else
+    p.noiseEstimateQuality='multi_background_frames';
 end
+p.backgroundFrameCount=size(stack,3);
 low=max(max(p.lowAbs,p.noiseLow*sigma),p.lowRel*B);
 high=max(max(p.highAbs,p.noiseHigh*sigma),p.highRel*B);
 out=fullfile(folder,['spray_trial_' datestr(now,'yyyymmdd_HHMMSS')]);
