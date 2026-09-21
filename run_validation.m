@@ -40,7 +40,7 @@ if isfile(settingsFile)
     measurementRoot=spray_measure_threejets(preprocessRoot,settingsFile,cfg.validationDir);
 else
     fprintf('未找到固定测量配置，本次进入首次人工确认。\n');
-    measurementRoot=spray_measure_threejets(preprocessRoot);
+    measurementRoot=spray_measure_threejets(preprocessRoot,[],cfg.validationDir);
     generatedSettings=fullfile(measurementRoot,'measurement_settings.mat');
     if isfile(generatedSettings)
         settingsDir=fileparts(settingsFile);
