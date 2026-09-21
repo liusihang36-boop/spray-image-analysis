@@ -314,7 +314,12 @@ end
 % 原图目录必须确实含当前序列原图，不能静默将错误目录当二值底图。
 raw=''; useRaw=false;
 while true
- candidateRaw=uigetdir(fileparts(root),'选择原始BMP目录；取消可明确选择二值预览');
+ if nargin>=3 && ~isempty(rawOverride)
+  candidateRaw=rawOverride;
+  rawOverride=''; % 自动目录仅尝试一次；若验证失败则允许人工重选
+ else
+  candidateRaw=uigetdir(fileparts(root),'选择原始BMP目录；取消可明确选择二值预览');
+ end
  if isequal(candidateRaw,0)
   if p.requireRawOverlay
    safeClose(f); safeClose(nf); safeClose(g);
