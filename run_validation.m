@@ -23,11 +23,11 @@ end
 
 if nargin<3 || isempty(analysisMode), analysisMode="three_jets"; end
 analysisMode=lower(string(analysisMode));
-if ~ismember(analysisMode,["three_jets","merged_spray"])
-    error('analysisMode必须为three_jets或merged_spray。');
+if ~ismember(analysisMode,["three_jets","merged_spray","multi_plume"])
+    error('analysisMode必须为three_jets、merged_spray或multi_plume。');
 end
 if nargin<2 || isempty(settingsFile)
-    if analysisMode=="merged_spray"
+    if analysisMode~="three_jets"
         settingsFile=fullfile(repoRoot,'config','measurement_settings_merged.mat');
     else
         settingsFile=fullfile(repoRoot,'config','measurement_settings.mat');
@@ -46,15 +46,23 @@ end
 fprintf('阶段2/2：分析模式 %s。\n',analysisMode);
 if isfile(settingsFile)
     fprintf('读取本工况独立测量配置。\n');
-    if analysisMode=="merged_spray"
-        measurementRoot=spray_measure_merged(preprocessRoot,settingsFile,cfg.validationDir);
+    if analysisMode~="three_jets"
+        if analysisMode=="multi_plume"
+            measurementRoot=spray_measure_multiplume(preprocessRoot,settingsFile,cfg.validationDir);
+        else
+            measurementRoot=spray_measure_merged(preprocessRoot,settingsFile,cfg.validationDir);
+        end
     else
         measurementRoot=spray_measure_threejets(preprocessRoot,settingsFile,cfg.validationDir);
     end
 else
     fprintf('未找到固定测量配置，本次进入首次人工确认。\n');
-    if analysisMode=="merged_spray"
-        measurementRoot=spray_measure_merged(preprocessRoot,[],cfg.validationDir);
+    if analysisMode~="three_jets"
+        if analysisMode=="multi_plume"
+            measurementRoot=spray_measure_multiplume(preprocessRoot,[],cfg.validationDir);
+        else
+            measurementRoot=spray_measure_merged(preprocessRoot,[],cfg.validationDir);
+        end
     else
         measurementRoot=spray_measure_threejets(preprocessRoot,[],cfg.validationDir);
     end
@@ -68,7 +76,7 @@ else
 end
 result=struct('preprocessRoot',preprocessRoot,'measurementRoot',measurementRoot, ...
     'analysisMode',analysisMode,'completedAt',datetime('now'));
-if analysisMode=="merged_spray"
+if analysisMode~="three_jets"
     result.reportFile=generate_merged_report(measurementRoot);
 else
     result.reportFile=generate_validation_report(measurementRoot);
