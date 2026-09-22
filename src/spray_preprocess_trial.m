@@ -1,4 +1,4 @@
-﻿function out = spray_preprocess_trial(folder,bgNames,bgPath)
+function out = spray_preprocess_trial(folder,bgNames,bgPath)
 % 喷雾原始图像预处理试用版（不计算毫米贯穿距或锥角）
 % 运行：spray_preprocess_trial；需要 Image Processing Toolbox。
 % 选择直接包含 BMP 的文件夹，再选择确认无喷雾的背景帧。
@@ -69,6 +69,8 @@ end
 B=median(stack,3);
 valid=B>p.viewMin;
 valid=bwareafilt(valid,1); % 仅选背景主视窗，不填充内部遮挡
+[excluded,obstructionMeta]=spray_obstruction_mask(folder,B);
+valid=valid & ~excluded;
 valid=imerode(valid,strel('disk',p.edgeMargin,0));
 if nnz(valid)<100, error('自动有效区域过小，请检查背景帧或viewMin参数。'); end
 % 只对已确认无喷雾的背景帧估计噪声；无需人工参考区域。
@@ -81,7 +83,7 @@ end
 sigma=max(1,1.4826*median(abs(noise-median(noise))));
 if size(stack,3)<5
     p.noiseEstimateQuality='single_or_few_background_frames';
-    warning('本工况仅有%d张已确认背景帧：背景中位图可用，但帧间噪声尺度为降级估计；已写入质量记录。',size(stack,3));
+    fprintf('背景信息：%d张确认背景；使用固定灰度门限，帧间噪声未充分估计。\n',size(stack,3));
 else
     p.noiseEstimateQuality='multi_background_frames';
 end
@@ -95,7 +97,7 @@ if p.saveDifference, mkdir(fullfile(out,'difference')); end
 mkdir(fullfile(out,'baseline_mask')); mkdir(fullfile(out,'recovered_pixels'));
 imwrite(valid,fullfile(out,'valid_mask.png'));
 imwrite(uint8(B),fullfile(out,'background.png'));
-save(fullfile(out,'settings.mat'),'p','B','valid','sigma','low','high','bgNames','bgPath');
+save(fullfile(out,'settings.mat'),'p','B','valid','sigma','low','high','bgNames','bgPath','excluded','obstructionMeta');
 n=numel(files); names={files.name}'; status=repmat({'not_processed'},n,1);
 area=nan(n,1); offsets=nan(n,1); referenceP95=nan(n,1);
 appliedOffsets=nan(n,1); correctionRejected=false(n,1);
