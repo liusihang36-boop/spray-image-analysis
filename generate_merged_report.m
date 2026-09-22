@@ -1,9 +1,9 @@
 function reportFile=generate_merged_report(measurementRoot)
 %GENERATE_MERGED_REPORT 整体喷雾有效率和质量标记汇总。
 s=load(fullfile(measurementRoot,'measurements.mat'),'T'); T=s.T; n=height(T);
-names={'贯穿距','整体拟合锥角','下游展开角','整体面积','主体贯穿距','主体拟合锥角','主体下游角'};
+names={'贯穿距','整体可见截面张角','下游展开角','整体面积','主体贯穿距','主体可见截面张角','主体下游角','固定30mm截面张角'};
 vars={'Penetration_mm','ConeAngle_deg','DownstreamAngle_deg','Area_mm2', ...
- 'CorePenetration_mm','CoreConeAngle_deg','CoreDownstreamAngle_deg'};
+ 'CorePenetration_mm','CoreConeAngle_deg','CoreDownstreamAngle_deg','FixedStationAngle_deg'};
 rows=cell(numel(vars),4);
 for k=1:numel(vars)
  valid=isfinite(T.(vars{k})); rows(k,:)={names{k},nnz(valid),100*nnz(valid)/max(n,1),vars{k}};
