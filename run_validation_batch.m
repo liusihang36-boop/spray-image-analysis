@@ -20,7 +20,7 @@ for k=1:numel(d)
  fprintf('\n========== 工况 %d/%d：%s ==========\n',k,numel(d),condition);
  try
   mode=resolveMode(rawDir,condition);
-  if mode=="merged_spray", settingName='measurement_settings_merged.mat'; else, settingName='measurement_settings.mat'; end
+  if mode~="three_jets", settingName='measurement_settings_merged.mat'; else, settingName='measurement_settings.mat'; end
   one=run_validation(rawDir,fullfile(rawDir,settingName),mode);
   s=load(fullfile(one.measurementRoot,'measurements.mat'),'T'); T=s.T;
   if mode=="three_jets"
@@ -37,6 +37,7 @@ for k=1:numel(d)
   end
  catch ME
   Condition(end+1,1)=condition; AnalysisMode(end+1,1)="未知"; Object(end+1,1)="全部"; BMPCount(end+1,1)=count(k); %#ok<AGROW>
+  if strcmp(ME.identifier,'spray:Cancelled'), rethrow(ME); end
   Status(end+1,1)="失败"; PenetrationRate(end+1,1)=NaN; ConeRate(end+1,1)=NaN; DownstreamRate(end+1,1)=NaN;
   AreaRate(end+1,1)=NaN; ReliableRate(end+1,1)=NaN; ValleyConfidence(end+1,1)=NaN; UnclearRate(end+1,1)=NaN;
   MeasurementRoot(end+1,1)=""; Error(end+1,1)=string(ME.message); warning('工况%s失败：%s',condition,ME.message);
@@ -59,16 +60,14 @@ end
 
 function mode=resolveMode(rawDir,condition)
 marker=fullfile(rawDir,'analysis_mode.txt');
-if isfile(marker)
- mode=lower(strtrim(string(fileread(marker))));
-else
- if contains(condition,"+400+")||contains(condition,"+500+"), suggested="merged_spray"; else, suggested="three_jets"; end
- q=questdlg(sprintf('%s\n建议模式：%s',condition,suggested),'确认喷雾处理模式', ...
-  '三束独立','整体合并','取消批次',char(modeLabel(suggested)));
- if strcmp(q,'三束独立'), mode="three_jets"; elseif strcmp(q,'整体合并'), mode="merged_spray"; else, error('用户取消模式确认。'); end
- fid=fopen(marker,'w'); if fid>=0, fprintf(fid,'%s\n',mode); fclose(fid); end
-end
-if ~ismember(mode,["three_jets","merged_spray"]), error('analysis_mode.txt内容无效：%s',mode); end
+% 本版必须重审旧three_jets配置，不能按旧分束设置静默处理。
+q=questdlg(sprintf('%s\n选择形态；多束模式支持人工确认2至8束。',condition), ...
+ '重新确认喷雾模式','多束参考分析','整体喷雾','保留旧三束','多束参考分析');
+if strcmp(q,'多束参考分析'),mode="multi_plume";
+elseif strcmp(q,'整体喷雾'),mode="merged_spray";
+elseif strcmp(q,'保留旧三束'),mode="three_jets";
+else,error('spray:Cancelled','取消模式确认。');end
+fid=fopen(marker,'w');if fid>=0,fprintf(fid,'%s\n',mode);fclose(fid);end
 end
 
 function v=modeLabel(mode)
