@@ -3,12 +3,13 @@ function out=spray_measure_merged(root,settingsFile,rawOverride)
 % 不进行左/中/右人为分束。外层二值轮廓用于贯穿距和面积；灰度主体用于
 % 动态中心轴及主体角。角度由一段边界稳健拟合得到，不由单行截面决定。
 
-p.codeVersion="20260921_dual_mode_1";
+p.codeVersion="20260922_review2";
 p.fps=25000; p.analysisEnd_ms=5; p.windowDiameter_mm=170;
 p.coreContrast=0.45; p.coreCandidates=[0.30 0.35 0.40 0.45];
 p.minPixels=100; p.nozzleRadius_px=30; p.tipRadius_px=6;
 p.minTipSupport=20; p.fitRange=[0.15 0.60]; p.downRange=[0.55 0.85];
 p.minFitRows=15; p.maxFitRMSE_px=8; p.edgeMargin_px=2;
+p.fixedStation_mm=30; % 固定轴向截面，与比例截面角分别输出；所有工况须统一
 p.axisMinRadius_px=20; p.axisMaxDeflection_deg=45; p.overlayEvery=1;
 out='';
 if nargin<1||isempty(root)
@@ -35,27 +36,25 @@ if saved
  calibration=c.calibration; x0=double(c.x0); y0=double(c.y0); axisAngle=double(c.axisAngle);
 else
  [center,r,rmse]=fitWindowMerged(bwareafilt(B>30,1));
- f=figure('Name','整体喷雾标定','Color','w'); imshow(B,[0 255]); hold on;
- t=linspace(0,2*pi,400); plot(center(1)+r*cos(t),center(2)+r*sin(t),'g-','LineWidth',1.5);
- a=inputdlg({'视窗直径_mm','采用的视窗像素直径','喷嘴X_列','喷嘴Y_行'}, ...
-  '整体喷雾初始参数',1,{num2str(p.windowDiameter_mm),sprintf('%.3f',2*r),sprintf('%.1f',center(1)),'20'});
- if isempty(a), safeClose(f); return; end
- vals=str2double(a); if any(~isfinite(vals))||any(vals<=0), safeClose(f); error('初始参数必须为正数。'); end
- calibration=struct('diameter_mm',vals(1),'diameter_px',vals(2), ...
-  'mm_per_pixel',vals(1)/vals(2),'center_xy',center,'fit_rmse_px',rmse,'user_confirmed',true);
- x0=vals(3); y0=vals(4);
- [rf,rp]=uigetfile(fullfile(root,'6','*.bmp'),'选择整体喷雾轮廓清楚的参考帧');
- if isequal(rf,0), safeClose(f); return; end
- R=readMaskMerged(fullfile(rp,rf),[h w]);
- g=figure('Name','整体喷雾参考轴','Color','w'); imshow(R); hold on; plot(x0,y0,'r+');
- title('点击整体喷雾初始中心方向上的一点（后续逐帧允许动态偏转）');
- [xc,yc,b]=ginput(1); if isempty(xc)||b~=1||yc<=y0, safeClose(f); safeClose(g); return; end
- axisAngle=atan2d(xc-x0,yc-y0);
- plot([x0 xc],[y0 yc],'c-','LineWidth',2); drawnow;
- q=questdlg(sprintf('整体参考轴 %.2f°，是否采用？',axisAngle),'确认','采用','取消','采用');
- if ~strcmp(q,'采用'), safeClose(f); safeClose(g); return; end
- safeClose(f); safeClose(g);
+ a=inputdlg({'视窗物理直径_mm','确认像素直径_px','喷嘴X候选','喷嘴Y候选'}, ...
+ '标定初值，随后必须原图确认',1,{'170',num2str(2*r),num2str(center(1)),'20'});
+ if isempty(a), error('spray:Cancelled','取消标定。'); end
+ v=str2double(a); if any(~isfinite(v))||any(v<=0), error('标定无效。'); end
+ calibration=struct('diameter_mm',v(1),'diameter_px',v(2),'mm_per_pixel',v(1)/v(2), ...
+ 'center_xy',center,'fit_rmse_px',rmse,'user_confirmed',true);
+ x0=v(3); y0=v(4); axisAngle=0;
 end
+internalConfirmed=saved&&isfield(c,'internalConfirmed')&&c.internalConfirmed;
+if ~internalConfirmed
+ if nargin>=3&&~isempty(rawOverride), previewRaw=rawOverride; else, previewRaw=fileparts(root); end
+ [rf,rp]=uigetfile(fullfile(previewRaw,'*.bmp'),'选择清晰原图确认喷嘴和轴线');
+ if isequal(rf,0), error('spray:Cancelled','取消原图预览。'); end
+ reference=imread(fullfile(rp,rf)); if ndims(reference)==3, reference=rgb2gray(reference); end
+ geo=struct('x0',x0,'y0',y0,'axisAngle',axisAngle,'calibration',calibration);
+ geo=spray_confirm_geometry(B,reference,geo,"merged_spray");
+ x0=geo.x0;y0=geo.y0;axisAngle=geo.axisAngle;
+end
+
 if ~isfinite(calibration.mm_per_pixel)||calibration.mm_per_pixel<=0|| ...
  any(~isfinite([x0 y0 axisAngle]))||x0<1||x0>w||y0<1||y0>h
  error('整体喷雾配置无效。');
@@ -73,7 +72,7 @@ save(fullfile(out,'measurement_settings.mat'),'p','calibration','x0','y0','axisA
 copyfile([mfilename('fullpath') '.m'],fullfile(out,'executed_spray_measure_merged.m'));
 
 N=numel(ids)-1; File=string(names(2:end)); FrameID=ids(2:end); Time_ms=(FrameID-zeroID)*1000/p.fps;
-nanv=nan(N,1); Penetration_mm=nanv; AxialPenetration_mm=nanv; Area_mm2=nanv;
+nanv=nan(N,1); FixedStationAngle_deg=nanv; VisibleRadialExtent_mm=nanv; FitSlopeAngle_deg=nanv; Penetration_mm=nanv; AxialPenetration_mm=nanv; Area_mm2=nanv;
 ConeAngle_deg=nanv; LeftHalfAngle_deg=nanv; RightHalfAngle_deg=nanv; DownstreamAngle_deg=nanv;
 MaxWidth_mm=nanv; WidthHalf_mm=nanv; NearWidth_mm=nanv; ShapeFactor=nanv;
 CentroidOffset_mm=nanv; DeflectionAngle_deg=nanv; DynamicAxis_deg=nanv;
@@ -95,6 +94,7 @@ for i=1:N
   DynamicAxis_deg(i)=estimateAxisMerged(core,M,x0,y0,axisAngle,p);
   ax=[sind(DynamicAxis_deg(i)) cosd(DynamicAxis_deg(i))]; nv=[cosd(DynamicAxis_deg(i)) -sind(DynamicAxis_deg(i))];
   met=measureOneMerged(M,x0,y0,ax,nv,physicalEdge,p,scale);
+  FixedStationAngle_deg(i)=met.fixedAngle; VisibleRadialExtent_mm(i)=met.visibleRadial*scale; FitSlopeAngle_deg(i)=met.fitAngle;
   Penetration_mm(i)=met.radial*scale; AxialPenetration_mm(i)=met.axial*scale; Area_mm2(i)=nnz(M)*scale^2;
   ConeAngle_deg(i)=met.cone; LeftHalfAngle_deg(i)=met.left; RightHalfAngle_deg(i)=met.right;
   DownstreamAngle_deg(i)=met.down; MaxWidth_mm(i)=met.maxWidth*scale;
@@ -107,7 +107,7 @@ for i=1:N
    cm=measureOneMerged(core,x0,y0,ax,nv,physicalEdge,p,scale);
    CorePenetration_mm(i)=cm.radial*scale; CoreConeAngle_deg(i)=cm.cone; CoreDownstreamAngle_deg(i)=cm.down;
   end
-  Reliable(i)=~met.detached&&met.tipSupport>=p.minTipSupport&&isfinite(met.down);
+  Reliable(i)=~met.detached&&~met.touch&&met.tipSupport>=p.minTipSupport&&isfinite(met.down);
   Status(i)="已计算";
   if met.touch, Status(i)=Status(i)+"；触及视窗，可见值可能截断"; end
   if met.tipSupport<p.minTipSupport, Status(i)=Status(i)+"；前端支撑不足"; end
@@ -132,6 +132,18 @@ T=table(File,FrameID,Time_ms,Penetration_mm,AxialPenetration_mm,Area_mm2,ConeAng
  ShapeFactor,CentroidOffset_mm,DeflectionAngle_deg,DynamicAxis_deg,CorePenetration_mm, ...
  CoreConeAngle_deg,CoreDownstreamAngle_deg,TipSupportPixels,BoundaryRMSE_px,DownstreamRMSE_px, ...
  WindowTouch,Detached,Reliable,Status,Error);
+T.FixedStationAngle_deg=FixedStationAngle_deg;
+T.FixedStation_mm=repmat(p.fixedStation_mm,height(T),1);
+T.VisibleRadialExtent_mm=VisibleRadialExtent_mm;
+T.FitSlopeAngle_deg=FitSlopeAngle_deg;
+failed=T.Status=="处理失败";
+for kk=4:width(T)
+ name=T.Properties.VariableNames{kk};
+ if isnumeric(T.(name)),T.(name)(failed,:)=NaN;end
+end
+T.Reliable(failed)=false;
+T.AngleDefinition=repmat("可见截面喷嘴张角中位数_非直线拟合角",height(T),1);
+T.PhaseClassification=repmat("未分相_光学衰减区域",height(T),1);
 save(fullfile(out,'measurements.mat'),'T'); writetable(T,fullfile(out,'整体喷雾测量结果.xlsx'),'Sheet','整体喷雾');
 fprintf('整体喷雾测量完成：%s\n',out);
 end
@@ -145,7 +157,7 @@ end
 
 function M=keepNozzleComponents(M,x0,y0,r)
 [h,w]=size(M); [X,Y]=meshgrid(1:w,1:h); seed=M&hypot(X-x0,Y-y0)<=r;
-if any(seed(:)), M=imreconstruct(seed,M,8); elseif any(M(:)), M=bwareafilt(M,1); end
+if any(seed(:)), M=imreconstruct(seed,M,8); else, M=false(size(M)); end
 end
 
 function C=grayCoreMerged(B,I,valid,threshold)
@@ -171,15 +183,26 @@ z=dx*ax(1)+dy*ax(2); u=dx*nv(1)+dy*nv(2); r=hypot(dx,dy); q=z>0;
 x=x(q); y=y(q); z=z(q); u=u(q); r=r(q);
 m=struct('radial',NaN,'axial',NaN,'cone',NaN,'left',NaN,'right',NaN,'down',NaN, ...
  'maxWidth',NaN,'halfWidth',NaN,'nearWidth',NaN,'centroidOffset',NaN,'tipSupport',0, ...
- 'rmse',NaN,'downRMSE',NaN,'touch',false,'detached',true,'lines',[]);
+ 'visibleRadial',NaN,'fixedAngle',NaN,'fitAngle',NaN,'rmse',NaN,'downRMSE',NaN,'touch',false,'detached',true,'lines',[]);
 if isempty(z), return; end
-[m.radial,it]=max(r); m.axial=max(z); m.centroidOffset=mean(u); m.detached=~any(r<=p.nozzleRadius_px);
+[m.radial,it]=max(r); m.visibleRadial=m.radial; m.axial=max(z); m.centroidOffset=mean(u); m.detached=~any(r<=p.nozzleRadius_px);
 m.tipSupport=nnz(hypot(double(x)-double(x(it)),double(y)-double(y(it)))<=p.tipRadius_px);
 ind=sub2ind([h w],y,x); m.touch=any(edge(ind)&r>p.nozzleRadius_px);
 [zs,lo,hi]=rowEnvelope(z,u); widths=hi-lo; m.maxWidth=max(widths);
+% 只用远端检查截断，近喷嘴遮挡不应污染前端质量。
+tipBand=z>=.95*m.axial; tipCensored=any(edge(ind(tipBand)));
 m.halfWidth=localWidth(zs,widths,.5*m.axial); m.nearWidth=localWidth(zs,widths,.2*m.axial);
-[m.cone,m.left,m.right,m.rmse,m.lines]=fitEnvelope(zs,lo,hi,p.fitRange*m.axial,x0,y0,ax,nv,p);
-[m.down,~,~,m.downRMSE]=fitEnvelope(zs,lo,hi,p.downRange*m.axial,x0,y0,ax,nv,p);
+[m.fitAngle,~,~,m.rmse,m.lines]=fitEnvelope(zs,lo,hi,p.fitRange*m.axial,x0,y0,ax,nv,p);
+[~,~,~,m.downRMSE]=fitEnvelope(zs,lo,hi,p.downRange*m.axial,x0,y0,ax,nv,p);
+[m.cone,m.left,m.right]=spray_visible_angle(zs,lo,hi,p.fitRange*m.axial,edge,x0,y0,ax,nv);
+m.down=spray_visible_angle(zs,lo,hi,p.downRange*m.axial,edge,x0,y0,ax,nv);
+station=p.fixedStation_mm/scale;
+m.fixedAngle=spray_visible_angle(zs,lo,hi,[station-5 station+5],edge,x0,y0,ax,nv);
+% 截断时比例位置依赖未知真实长度，不能把这些角冒充完整喷雾角。
+if tipCensored||m.tipSupport<p.minTipSupport
+ m.radial=NaN;m.axial=NaN;m.cone=NaN;m.left=NaN;m.right=NaN;m.down=NaN;m.halfWidth=NaN;
+end
+
 end
 
 function [zs,lo,hi]=rowEnvelope(z,u)
@@ -197,7 +220,7 @@ if nnz(q)<p.minFitRows, return; end
 zz=double(z(q)); ll=double(lo(q)); hh=double(hi(q));
 [bl,rl]=robustLine(zz,ll); [br,rr]=robustLine(zz,hh); rmse=max(rl,rr);
 if ~isfinite(rmse)||rmse>p.maxFitRMSE_px, return; end
-left=max(0,-atan2d(bl(1),1)); right=max(0,atan2d(br(1),1)); cone=left+right;
+left=-atan2d(bl(1),1); right=atan2d(br(1),1); cone=left+right;
 ze=[min(zz);max(zz)]; ul=polyval(bl,ze); ur=polyval(br,ze);
 pl=[x0 y0]+ze*ax+ul*nv; pr=[x0 y0]+ze*ax+ur*nv; lines=[pl pr];
 end
