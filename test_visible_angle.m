@@ -12,5 +12,14 @@ E(:)=true;c=spray_visible_angle(z,lo,hi,[20 80],E,125,10,[0 1],[1 0]);
 assert(isnan(c),'遮挡端点仍输出角度');
 E(:)=false;c=spray_visible_angle(z(1:3),lo(1:3),hi(1:3),[10 80],E,125,10,[0 1],[1 0]);
 assert(isnan(c),'截面不足仍输出角度');
+% 行向量输入应与列向量一致，且显示端点对应合格截面。
+E(:)=false;
+[d,~,~,coverage,~,sections]=spray_visible_angle(z',lo',hi',[20 80],E,125,10,[0 1],[1 0]);
+assert(abs(d-a)<1e-10&&coverage==1&&size(sections,1)==61);
+% 测角范围以外的遮挡不能清空完整截面角。
+E(110:120,:)=true;
+d=spray_visible_angle(z,lo,hi,[20 80],E,125,10,[0 1],[1 0]);
+assert(abs(d-a)<1e-10,'范围外遮挡误伤测角截面');
 fprintf('可见截面张角几何检查通过。\n');
 end
+
