@@ -1,9 +1,9 @@
 function out=spray_measure_merged(root,settingsFile,rawOverride)
 %SPRAY_MEASURE_MERGED 整体塌缩/合并喷雾二维几何测量（MATLAB R2023a）。
 % 不进行左/中/右人为分束。外层二值轮廓用于贯穿距和面积；灰度主体用于
-% 动态中心轴及主体角。角度由一段边界稳健拟合得到，不由单行截面决定。
+% 动态中心轴及主体角。主角度为合格截面张角中位数；直线拟合角仅作单独诊断。
 
-p.codeVersion="20260922_review2";
+p.codeVersion="20260926_review3";
 p.fps=25000; p.analysisEnd_ms=5; p.windowDiameter_mm=170;
 p.coreContrast=0.45; p.coreCandidates=[0.30 0.35 0.40 0.45];
 p.minPixels=100; p.nozzleRadius_px=30; p.tipRadius_px=6;
@@ -20,7 +20,7 @@ sf=fullfile(root,'settings.mat'); lf=fullfile(root,'processing_log.csv');
 if ~isfile(sf)||~isfile(lf)||~isfolder(fullfile(root,'6'))
  error('整体模式需要settings.mat、processing_log.csv和6子目录。');
 end
-s=load(sf,'B','valid','p'); B=single(s.B); valid=logical(s.valid); [h,w]=size(B);
+s=load(sf,'B','valid','p','physicalValid','sectorMask'); B=single(s.B); valid=logical(s.valid); [h,w]=size(B);
 L=readtable(lf,'TextType','string'); [ids,ord]=sort(double(L.FrameID)); L=L(ord,:);
 names=cellstr(L.File);
 if numel(ids)<2||numel(unique(ids))~=numel(ids), error('原始帧号不足或重复。'); end
@@ -78,9 +78,22 @@ MaxWidth_mm=nanv; WidthHalf_mm=nanv; NearWidth_mm=nanv; ShapeFactor=nanv;
 CentroidOffset_mm=nanv; DeflectionAngle_deg=nanv; DynamicAxis_deg=nanv;
 CorePenetration_mm=nanv; CoreConeAngle_deg=nanv; CoreDownstreamAngle_deg=nanv;
 TipSupportPixels=nanv; BoundaryRMSE_px=nanv; DownstreamRMSE_px=nanv;
+SectorContact=false(N,1); TipCensored=false(N,1);
+ConeCoverage=nanv; DownstreamCoverage=nanv;
+ConeReason=repmat("前景不足或未处理",N,1); DownstreamReason=ConeReason;
 WindowTouch=false(N,1); Detached=false(N,1); Reliable=false(N,1);
 Status=repmat("未处理",N,1); Error=repmat("",N,1);
-physicalEdge=valid&~imerode(valid,strel('disk',p.edgeMargin_px,0));
+physicalValid=valid;
+if isfield(s,'physicalValid'), physicalValid=logical(s.physicalValid); end
+if ~isequal(size(physicalValid),size(valid)), error('物理视窗尺寸不一致。'); end
+physicalEdge=physicalValid&~imerode(physicalValid,strel('disk',p.edgeMargin_px,0));
+sectorEdge=false(size(valid));
+if isfield(s,'sectorMask')
+ sectorMask=logical(s.sectorMask);
+ if ~isequal(size(sectorMask),size(valid)), error('扇区尺寸不一致。'); end
+ sectorEdge=physicalValid&sectorMask&~imerode(sectorMask,strel('disk',p.edgeMargin_px,0));
+end
+measurementEdge=physicalEdge|sectorEdge;
 fig=figure('Visible','off','Color','w','Position',[100 100 950 900]); cleanFig=onCleanup(@()safeClose(fig)); %#ok<NASGU>
 for i=1:N
  try
@@ -93,7 +106,7 @@ for i=1:N
   core=keepNozzleComponents(core,x0,y0,p.nozzleRadius_px);
   DynamicAxis_deg(i)=estimateAxisMerged(core,M,x0,y0,axisAngle,p);
   ax=[sind(DynamicAxis_deg(i)) cosd(DynamicAxis_deg(i))]; nv=[cosd(DynamicAxis_deg(i)) -sind(DynamicAxis_deg(i))];
-  met=measureOneMerged(M,x0,y0,ax,nv,physicalEdge,p,scale);
+  met=measureOneMerged(M,x0,y0,ax,nv,physicalEdge,sectorEdge,measurementEdge,p,scale);
   FixedStationAngle_deg(i)=met.fixedAngle; VisibleRadialExtent_mm(i)=met.visibleRadial*scale; FitSlopeAngle_deg(i)=met.fitAngle;
   Penetration_mm(i)=met.radial*scale; AxialPenetration_mm(i)=met.axial*scale; Area_mm2(i)=nnz(M)*scale^2;
   ConeAngle_deg(i)=met.cone; LeftHalfAngle_deg(i)=met.left; RightHalfAngle_deg(i)=met.right;
@@ -102,24 +115,31 @@ for i=1:N
   ShapeFactor(i)=Area_mm2(i)/max(Penetration_mm(i)^2,eps);
   CentroidOffset_mm(i)=met.centroidOffset*scale; DeflectionAngle_deg(i)=DynamicAxis_deg(i)-axisAngle;
   TipSupportPixels(i)=met.tipSupport; BoundaryRMSE_px(i)=met.rmse; DownstreamRMSE_px(i)=met.downRMSE;
+  SectorContact(i)=met.sectorContact; TipCensored(i)=met.tipCensored;
+  ConeCoverage(i)=met.coverage;DownstreamCoverage(i)=met.downCoverage;
+  ConeReason(i)=met.reason;DownstreamReason(i)=met.downReason;
   WindowTouch(i)=met.touch; Detached(i)=met.detached;
   if any(core(:))
-   cm=measureOneMerged(core,x0,y0,ax,nv,physicalEdge,p,scale);
+   cm=measureOneMerged(core,x0,y0,ax,nv,physicalEdge,sectorEdge,measurementEdge,p,scale);
    CorePenetration_mm(i)=cm.radial*scale; CoreConeAngle_deg(i)=cm.cone; CoreDownstreamAngle_deg(i)=cm.down;
   end
-  Reliable(i)=~met.detached&&~met.touch&&met.tipSupport>=p.minTipSupport&&isfinite(met.down);
+  Reliable(i)=~met.detached&&~met.touch&&~met.sectorContact&&met.tipSupport>=p.minTipSupport&&isfinite(met.down);
   Status(i)="已计算";
   if met.touch, Status(i)=Status(i)+"；触及视窗，可见值可能截断"; end
+  if met.sectorContact, Status(i)=Status(i)+"；参考分界接触，归属待复核"; end
+  if met.tipCensored, Status(i)=Status(i)+"；前端截断，完整长度不可用"; end
   if met.tipSupport<p.minTipSupport, Status(i)=Status(i)+"；前端支撑不足"; end
   if mod(i-1,p.overlayEvery)==0||i==N
    figure(fig); clf(fig); imshow(I); hold on;
    contour(M,[.5 .5],'r-','LineWidth',1); if any(core(:)), contour(core,[.5 .5],'y:'); end
    plot([x0 x0+h*ax(1)],[y0 y0+h*ax(2)],'c--','LineWidth',1.2); plot(x0,y0,'g+','MarkerSize',12);
-   if ~isempty(met.lines)
-    plot(met.lines(:,1),met.lines(:,2),'b-','LineWidth',2); plot(met.lines(:,3),met.lines(:,4),'b-','LineWidth',2);
+   if isfinite(met.cone)&&~isempty(met.sections)
+    % 蓝点为参与截面张角统计的两侧端点，不再画无关的拟合直线。
+    plot(met.sections(:,1),met.sections(:,2),'b.');
+    plot(met.sections(:,3),met.sections(:,4),'b.');
    end
    title(sprintf('%s | %.2f ms | 整体喷雾',names{i+1},Time_ms(i)),'Interpreter','none');
-   text(10,h-15,sprintf('S=%.2f mm  angle=%.2f°  deflection=%.2f°',Penetration_mm(i),ConeAngle_deg(i),DeflectionAngle_deg(i)), ...
+   text(10,h-15,sprintf('S=%.2f mm  截面张角中位数=%.2f°  偏转=%.2f°',Penetration_mm(i),ConeAngle_deg(i),DeflectionAngle_deg(i)), ...
     'Color','w','BackgroundColor','k');
    [~,stem]=fileparts(names{i+1}); print(fig,fullfile(out,'overlay',[stem '.png']),'-dpng','-r130');
   end
@@ -132,6 +152,9 @@ T=table(File,FrameID,Time_ms,Penetration_mm,AxialPenetration_mm,Area_mm2,ConeAng
  ShapeFactor,CentroidOffset_mm,DeflectionAngle_deg,DynamicAxis_deg,CorePenetration_mm, ...
  CoreConeAngle_deg,CoreDownstreamAngle_deg,TipSupportPixels,BoundaryRMSE_px,DownstreamRMSE_px, ...
  WindowTouch,Detached,Reliable,Status,Error);
+T.SectorContact=SectorContact;T.TipCensored=TipCensored;
+T.ConeCoverage=ConeCoverage;T.DownstreamCoverage=DownstreamCoverage;
+T.ConeReason=ConeReason;T.DownstreamReason=DownstreamReason;
 T.FixedStationAngle_deg=FixedStationAngle_deg;
 T.FixedStation_mm=repmat(p.fixedStation_mm,height(T),1);
 T.VisibleRadialExtent_mm=VisibleRadialExtent_mm;
@@ -141,7 +164,7 @@ for kk=4:width(T)
  name=T.Properties.VariableNames{kk};
  if isnumeric(T.(name)),T.(name)(failed,:)=NaN;end
 end
-T.Reliable(failed)=false;
+T.Reliable(failed)=false;T.ConeReason(failed)="处理失败";T.DownstreamReason(failed)="处理失败";
 T.AngleDefinition=repmat("可见截面喷嘴张角中位数_非直线拟合角",height(T),1);
 T.PhaseClassification=repmat("未分相_光学衰减区域",height(T),1);
 save(fullfile(out,'measurements.mat'),'T'); writetable(T,fullfile(out,'整体喷雾测量结果.xlsx'),'Sheet','整体喷雾');
@@ -177,30 +200,39 @@ a=atan2d(cx,cy); delta=mod(a-a0+180,360)-180;
 a=a0+max(-p.axisMaxDeflection_deg,min(p.axisMaxDeflection_deg,delta));
 end
 
-function m=measureOneMerged(M,x0,y0,ax,nv,edge,p,scale) %#ok<INUSD>
+function m=measureOneMerged(M,x0,y0,ax,nv,physicalEdge,sectorEdge,edge,p,scale)
 [h,w]=size(M); [y,x]=find(M); dx=double(x)-x0; dy=double(y)-y0;
 z=dx*ax(1)+dy*ax(2); u=dx*nv(1)+dy*nv(2); r=hypot(dx,dy); q=z>0;
 x=x(q); y=y(q); z=z(q); u=u(q); r=r(q);
 m=struct('radial',NaN,'axial',NaN,'cone',NaN,'left',NaN,'right',NaN,'down',NaN, ...
  'maxWidth',NaN,'halfWidth',NaN,'nearWidth',NaN,'centroidOffset',NaN,'tipSupport',0, ...
+ 'sectorContact',false,'tipCensored',false,'coverage',0,'downCoverage',0, ...
+ 'reason',"前景不足",'downReason',"前景不足",'sections',[], ...
  'visibleRadial',NaN,'fixedAngle',NaN,'fitAngle',NaN,'rmse',NaN,'downRMSE',NaN,'touch',false,'detached',true,'lines',[]);
 if isempty(z), return; end
 [m.radial,it]=max(r); m.visibleRadial=m.radial; m.axial=max(z); m.centroidOffset=mean(u); m.detached=~any(r<=p.nozzleRadius_px);
 m.tipSupport=nnz(hypot(double(x)-double(x(it)),double(y)-double(y(it)))<=p.tipRadius_px);
-ind=sub2ind([h w],y,x); m.touch=any(edge(ind)&r>p.nozzleRadius_px);
+ind=sub2ind([h w],y,x); m.touch=any(physicalEdge(ind)&r>p.nozzleRadius_px);
+m.sectorContact=any(sectorEdge(ind)&r>p.nozzleRadius_px);
 [zs,lo,hi]=rowEnvelope(z,u); widths=hi-lo; m.maxWidth=max(widths);
 % 只用远端检查截断，近喷嘴遮挡不应污染前端质量。
 tipBand=z>=.95*m.axial; tipCensored=any(edge(ind(tipBand)));
+% 径向极值也必须检查，不能只检查轴向前端。
+radialBand=r>=.95*m.radial;tipCensored=tipCensored||any(edge(ind(radialBand)));
+m.tipCensored=tipCensored;
 m.halfWidth=localWidth(zs,widths,.5*m.axial); m.nearWidth=localWidth(zs,widths,.2*m.axial);
 [m.fitAngle,~,~,m.rmse,m.lines]=fitEnvelope(zs,lo,hi,p.fitRange*m.axial,x0,y0,ax,nv,p);
 [~,~,~,m.downRMSE]=fitEnvelope(zs,lo,hi,p.downRange*m.axial,x0,y0,ax,nv,p);
-[m.cone,m.left,m.right]=spray_visible_angle(zs,lo,hi,p.fitRange*m.axial,edge,x0,y0,ax,nv);
-m.down=spray_visible_angle(zs,lo,hi,p.downRange*m.axial,edge,x0,y0,ax,nv);
+[m.cone,m.left,m.right,m.coverage,m.reason,m.sections]=spray_visible_angle(zs,lo,hi,p.fitRange*m.axial,edge,x0,y0,ax,nv);
+[m.down,~,~,m.downCoverage,m.downReason]=spray_visible_angle(zs,lo,hi,p.downRange*m.axial,edge,x0,y0,ax,nv);
 station=p.fixedStation_mm/scale;
 m.fixedAngle=spray_visible_angle(zs,lo,hi,[station-5 station+5],edge,x0,y0,ax,nv);
 % 截断时比例位置依赖未知真实长度，不能把这些角冒充完整喷雾角。
 if tipCensored||m.tipSupport<p.minTipSupport
- m.radial=NaN;m.axial=NaN;m.cone=NaN;m.left=NaN;m.right=NaN;m.down=NaN;m.halfWidth=NaN;
+ m.radial=NaN;m.axial=NaN;m.cone=NaN;m.left=NaN;m.right=NaN;m.down=NaN;m.halfWidth=NaN;m.nearWidth=NaN;m.fitAngle=NaN;
+ if tipCensored, why="前端触及物理或参考分界，比例位置不确定";
+ else, why="前端支撑不足，比例位置不确定";end
+ m.reason=why;m.downReason=why;m.sections=[];
 end
 
 end
@@ -245,3 +277,4 @@ end
 function safeClose(h)
 if ishghandle(h), close(h); end
 end
+
